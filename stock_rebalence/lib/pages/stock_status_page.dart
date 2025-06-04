@@ -1,10 +1,10 @@
 // lib/pages/stock_status_page.dart
 import 'package:flutter/material.dart';
-import 'package:stock_rebalence/models/stock_holding.dart';
+import 'package:stock_rebalence/models/asset.dart';
 import 'package:stock_rebalence/pages/add_stock_page.dart';
-import 'package:stock_rebalence/service/stock_repository.dart';
+import 'package:stock_rebalence/service/asset_repository.dart';
 import 'package:stock_rebalence/service/alpha_vantage_service.dart';
-import 'package:syncfusion_flutter_charts/charts.dart'; // 차트 사용을 위한 import
+import 'package:syncfusion_flutter_charts/charts.dart';
 
 class AccountStatusPage extends StatefulWidget {
   const AccountStatusPage({super.key});
@@ -14,42 +14,51 @@ class AccountStatusPage extends StatefulWidget {
 }
 
 class _AccountStatusPageState extends State<AccountStatusPage> {
-  int _selectedNavigationBarIndex = 0;
+  final AssetRepository _assetRepository = AssetRepository();
+  final AlphaVantageService _alphaVantageService = AlphaVantageService();
 
-  final StockRepository _repository = StockRepository();
-  final YahooFinanceService _financeService = YahooFinanceService();
-
-  List<StockHolding> _holdings = []; // 실제 보유 주식 목록
+  List<Asset> _allAssets = [];
+  List<StockAsset> _stockAssets = [];
   bool _isLoading = true;
   double _totalAssets = 0.0;
   double _totalPurchaseAmount = 0.0;
   double _totalEvaluationAmount = 0.0;
   double _totalProfitLoss = 0.0;
   double _overallProfitLossRate = 0.0;
-  double _cashBalance = 500000.0; // 현금은 사용자가 입력하거나 다른 방식으로 관리 가능
+  double _cashBalance = 0.0;
 
-  // 파이 차트 데이터
   List<_PieData> _pieData = [];
 
   @override
   void initState() {
     super.initState();
-    _loadHoldingsAndUpdate();
+    _loadAssets();
   }
 
-  Future<void> _loadHoldingsAndUpdate() async {
-    if (!mounted) return; // 위젯이 마운트되지 않은 경우 상태 업데이트 방지
+  Future<void> _loadAssets() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
 
-    List<StockHolding> localHoldings = await _repository.getHoldings();
-    if (localHoldings.isNotEmpty) {
-      _holdings = await _financeService.updateStockHoldings(localHoldings);
-    } else {
-      _holdings = [];
+    try {
+      // 통합 자산 저장소에서 모든 자산 로드
+      _allAssets = await _assetRepository.getAssets();
+
+      // 주식 자산만 필터링
+      _stockAssets = _allAssets
+          .where((asset) => asset.type == AssetType.stock)
+          .cast<StockAsset>()
+          .toList();
+
+      // 주식 현재가 업데이트
+      await _updateStockPrices();
+
+      // 총계 계산
+      _calculateTotals();
+    } catch (e) {
+      print('자산 로딩 오류: $e');
     }
-    _calculateTotals();
 
     if (!mounted) return;
     setState(() {
@@ -57,17 +66,36 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     });
   }
 
+  Future<void> _updateStockPrices() async {
+    for (var stockAsset in _stockAssets) {
+      try {
+        final quote = await _alphaVantageService.getStockQuote(stockAsset.symbol);
+        if (quote != null) {
+          stockAsset.currentPrice = quote.price;
+        }
+        // API 제한을 피하기 위해 잠시 대기
+        await Future.delayed(const Duration(milliseconds: 300));
+      } catch (e) {
+        print('${stockAsset.symbol} 가격 업데이트 실패: $e');
+      }
+    }
+
+    // 업데이트된 자산 저장
+    await _assetRepository.saveAssets(_allAssets);
+  }
+
   void _calculateTotals() {
     _totalPurchaseAmount = 0.0;
     _totalEvaluationAmount = 0.0;
+    _cashBalance = 0.0;
 
-    for (var holding in _holdings) {
-      // API 호출로 currentPrice가 업데이트 되었다고 가정하고 계산
-      // updateStockHoldings에서 calculateProfitLoss가 이미 호출되었을 수 있음
-      // 명시적으로 여기서도 호출하거나, 해당 함수 내에서만 호출하도록 구조화
-      holding.calculateProfitLoss(); // currentPrice 기준으로 평가금액 및 손익 재계산
-      _totalPurchaseAmount += holding.purchasePrice * holding.quantity;
-      _totalEvaluationAmount += holding.evaluationAmount;
+    for (var asset in _allAssets) {
+      if (asset.type == AssetType.cash) {
+        _cashBalance += asset.quantity; // 현금은 수량이 곧 금액
+      } else {
+        _totalPurchaseAmount += asset.purchasePrice * asset.quantity;
+        _totalEvaluationAmount += asset.currentPrice * asset.quantity;
+      }
     }
 
     _totalProfitLoss = _totalEvaluationAmount - _totalPurchaseAmount;
@@ -80,33 +108,43 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
   }
 
   void _updatePieData() {
-    if (_totalAssets <= 0) { // 총 자산이 0 이하면 빈 데이터
+    if (_totalAssets <= 0) {
       _pieData = [];
       return;
     }
-    _pieData = [
-      if (_cashBalance > 0) _PieData('현금', _cashBalance, Colors.grey[400]!),
-      ..._holdings.where((h) => h.evaluationAmount > 0).map((h) => _PieData(
-          h.name.isNotEmpty ? h.name : h.symbol,
-          h.evaluationAmount,
-          _getColorForStock(h.symbol)))
-    ];
-    // 0 이하의 값은 차트에서 제외 (이미 where 필터로 처리)
-  }
 
-  final Map<String, Color> _stockColors = {};
-  int _colorIndex = 0;
-  final List<Color> _availableColors = [
-    Colors.blueAccent, Colors.greenAccent, Colors.orangeAccent, Colors.purpleAccent,
-    Colors.redAccent, Colors.tealAccent, Colors.pinkAccent, Colors.amberAccent,
-  ];
+    _pieData = [];
 
-  Color _getColorForStock(String symbol) {
-    if (!_stockColors.containsKey(symbol)) {
-      _stockColors[symbol] = _availableColors[_colorIndex % _availableColors.length];
-      _colorIndex++;
+    // 현금 추가
+    if (_cashBalance > 0) {
+      _pieData.add(_PieData('현금', _cashBalance, Colors.green));
     }
-    return _stockColors[symbol]!;
+
+    // 자산 유형별로 그룹화
+    Map<AssetType, double> assetTypeAmounts = {};
+    Map<AssetType, Color> assetTypeColors = {
+      AssetType.stock: Colors.blue,
+      AssetType.bond: Colors.orange,
+      AssetType.gold: Colors.amber,
+    };
+
+    for (var asset in _allAssets) {
+      if (asset.type != AssetType.cash) {
+        double amount = asset.currentPrice * asset.quantity;
+        assetTypeAmounts[asset.type] = (assetTypeAmounts[asset.type] ?? 0.0) + amount;
+      }
+    }
+
+    // 파이 차트 데이터 추가
+    assetTypeAmounts.forEach((type, amount) {
+      if (amount > 0) {
+        _pieData.add(_PieData(
+          type.displayName,
+          amount,
+          assetTypeColors[type] ?? Colors.grey,
+        ));
+      }
+    });
   }
 
   @override
@@ -117,13 +155,17 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     final Color? textColor = isDarkMode ? Colors.white70 : Colors.black87;
     final Color? titleColor = isDarkMode ? Colors.white : Colors.black;
 
-
     return Scaffold(
       appBar: AppBar(
         title: Text('나의 투자 현황', style: TextStyle(color: titleColor)),
         backgroundColor: cardBackgroundColor,
         elevation: 1.0,
         actions: [
+          IconButton(
+            icon: Icon(Icons.refresh, color: titleColor),
+            onPressed: _isLoading ? null : _loadAssets,
+            tooltip: '데이터 새로고침',
+          ),
           IconButton(
             icon: Icon(Icons.settings_outlined, color: titleColor),
             onPressed: () {
@@ -133,7 +175,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadHoldingsAndUpdate,
+        onRefresh: _loadAssets,
         child: ListView(
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.all(16.0),
@@ -142,32 +184,12 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
             const SizedBox(height: 24),
             _buildPortfolioChart(theme, cardBackgroundColor, textColor, titleColor),
             const SizedBox(height: 24),
-            _buildHoldingsList(theme, cardBackgroundColor, textColor, titleColor),
+            _buildAssetOverview(theme, cardBackgroundColor, textColor, titleColor),
             const SizedBox(height: 24),
-            _buildRebalanceButton(theme),
+            _buildStockHoldingsList(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 100), // FloatingActionButton을 위한 여백
           ],
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: '홈'),
-          BottomNavigationBarItem(icon: Icon(Icons.pie_chart_outline), label: '리밸런싱'),
-          BottomNavigationBarItem(icon: Icon(Icons.analytics_outlined), label: '투자 분석'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: '프로필'),
-        ],
-        currentIndex: _selectedNavigationBarIndex,
-        selectedItemColor: theme.colorScheme.primary,
-        unselectedItemColor: Colors.grey,
-        showUnselectedLabels: true,
-        onTap: (index) {
-          if (!mounted) return;
-          setState(() {
-            _selectedNavigationBarIndex = index;
-            // TODO: 각 탭에 따른 페이지 전환 로직 구현
-          });
-        },
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: cardBackgroundColor,
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
@@ -176,10 +198,10 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
             MaterialPageRoute(builder: (context) => const AddStockPage()),
           );
           if (result == true && mounted) {
-            _loadHoldingsAndUpdate();
+            _loadAssets();
           }
         },
-        tooltip: '보유 주식 추가',
+        tooltip: '주식 추가',
         child: const Icon(Icons.add),
       ),
     );
@@ -197,13 +219,24 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
             : Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '총 자산',
-              style: theme.textTheme.titleMedium?.copyWith(color: textColor),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '총 자산',
+                  style: theme.textTheme.titleMedium?.copyWith(color: textColor),
+                ),
+                if (_isLoading)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             Text(
-              '₩${_totalAssets.toStringAsFixed(0)}',
+              '\$${_totalAssets.toStringAsFixed(2)}',
               style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold, color: titleColor),
             ),
             const SizedBox(height: 16),
@@ -213,18 +246,18 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('총 투자원금', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
-                    Text('₩${_totalPurchaseAmount.toStringAsFixed(0)}', style: theme.textTheme.titleSmall?.copyWith(color: titleColor)),
+                    Text('투자 원금', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                    Text('\$${_totalPurchaseAmount.toStringAsFixed(2)}', style: theme.textTheme.titleSmall?.copyWith(color: titleColor)),
                   ],
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('총 평가손익', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                    Text('평가 손익', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
                     Text(
-                      '${_totalProfitLoss >= 0 ? '+' : ''}${_totalProfitLoss.toStringAsFixed(0)} (${_overallProfitLossRate.toStringAsFixed(2)}%)',
+                      '${_totalProfitLoss >= 0 ? '+' : ''}\$${_totalProfitLoss.toStringAsFixed(2)} (${_overallProfitLossRate.toStringAsFixed(2)}%)',
                       style: theme.textTheme.titleSmall?.copyWith(
-                        color: _totalProfitLoss >= 0 ? Colors.redAccent : Colors.blueAccent,
+                        color: _totalProfitLoss >= 0 ? Colors.green : Colors.red,
                       ),
                     ),
                   ],
@@ -236,7 +269,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('현금 잔고', style: theme.textTheme.bodyMedium?.copyWith(color: textColor)),
-                Text('₩${_cashBalance.toStringAsFixed(0)}', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold, color: titleColor)),
+                Text('\$${_cashBalance.toStringAsFixed(2)}', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold, color: titleColor)),
               ],
             )
           ],
@@ -270,7 +303,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                     yValueMapper: (_PieData data, _) => data.yData,
                     pointColorMapper: (_PieData data, _) => data.color,
                     dataLabelMapper: (_PieData data, _) => '${(data.yData / _totalAssets * 100).toStringAsFixed(1)}%',
-                    dataLabelSettings: const DataLabelSettings(isVisible: true, textStyle: TextStyle(fontSize: 10, color: Colors.black)), // 데이터 레이블 색상 고정
+                    dataLabelSettings: const DataLabelSettings(isVisible: true, textStyle: TextStyle(fontSize: 10, color: Colors.black)),
                     enableTooltip: true,
                   )
                 ],
@@ -282,54 +315,206 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     );
   }
 
-  Widget _buildHoldingsList(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
+  Widget _buildAssetOverview(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
+    Map<AssetType, int> assetCounts = {};
+    Map<AssetType, double> assetAmounts = {};
+
+    for (var asset in _allAssets) {
+      assetCounts[asset.type] = (assetCounts[asset.type] ?? 0) + 1;
+      if (asset.type == AssetType.cash) {
+        assetAmounts[asset.type] = (assetAmounts[asset.type] ?? 0.0) + asset.quantity;
+      } else {
+        assetAmounts[asset.type] = (assetAmounts[asset.type] ?? 0.0) + (asset.currentPrice * asset.quantity);
+      }
+    }
+
+    return Card(
+      color: cardColor,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('자산 현황', style: theme.textTheme.titleLarge?.copyWith(color: titleColor)),
+            const SizedBox(height: 16),
+            if (assetCounts.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Text('보유 자산이 없습니다.', style: theme.textTheme.bodyMedium?.copyWith(color: textColor)),
+                ),
+              )
+            else
+              ...AssetType.values.map((type) {
+                final count = assetCounts[type] ?? 0;
+                final amount = assetAmounts[type] ?? 0.0;
+                if (count == 0) return const SizedBox.shrink();
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: _getAssetTypeColor(type).withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(_getAssetIcon(type), color: _getAssetTypeColor(type)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(type.displayName, style: theme.textTheme.titleMedium?.copyWith(color: titleColor)),
+                            Text('$count개 보유', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        '\$${amount.toStringAsFixed(2)}',
+                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: titleColor),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getAssetTypeColor(AssetType type) {
+    switch (type) {
+      case AssetType.stock:
+        return Colors.blue;
+      case AssetType.cash:
+        return Colors.green;
+      case AssetType.bond:
+        return Colors.orange;
+      case AssetType.gold:
+        return Colors.amber;
+    }
+  }
+
+  IconData _getAssetIcon(AssetType type) {
+    switch (type) {
+      case AssetType.stock:
+        return Icons.trending_up;
+      case AssetType.cash:
+        return Icons.attach_money;
+      case AssetType.bond:
+        return Icons.receipt_long;
+      case AssetType.gold:
+        return Icons.stars;
+    }
+  }
+
+  Widget _buildStockHoldingsList(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('보유 종목', style: theme.textTheme.titleLarge?.copyWith(color: titleColor)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('주식 보유 현황', style: theme.textTheme.titleLarge?.copyWith(color: titleColor)),
+            if (_stockAssets.isNotEmpty)
+              TextButton.icon(
+                onPressed: _loadAssets,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('새로고침', style: TextStyle(fontSize: 12)),
+              ),
+          ],
+        ),
         const SizedBox(height: 8),
         _isLoading
             ? const Center(child: Padding(padding: EdgeInsets.all(20.0), child: CircularProgressIndicator()))
-            : _holdings.isEmpty
+            : _stockAssets.isEmpty
             ? Padding(
           padding: const EdgeInsets.symmetric(vertical: 20.0),
-          child: Center(child: Text('보유 중인 종목이 없습니다.', style: theme.textTheme.bodyMedium?.copyWith(color: textColor))),
+          child: Center(
+            child: Column(
+              children: [
+                Icon(Icons.trending_up, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                Text('보유 중인 주식이 없습니다.', style: theme.textTheme.bodyMedium?.copyWith(color: textColor)),
+                const SizedBox(height: 8),
+                Text('+ 버튼을 눌러 첫 번째 주식을 추가해보세요.', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+              ],
+            ),
+          ),
         )
             : ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: _holdings.length,
+          itemCount: _stockAssets.length,
           itemBuilder: (context, index) {
-            final stock = _holdings[index];
+            final stock = _stockAssets[index];
             return Card(
               color: cardColor,
               margin: const EdgeInsets.symmetric(vertical: 4.0),
               child: ListTile(
-                title: Text(stock.name.isNotEmpty ? stock.name : stock.symbol, style: theme.textTheme.titleMedium?.copyWith(color: titleColor)),
-                subtitle: Text(
-                    '수량: ${stock.quantity.toStringAsFixed(0)}주 · 평단: ${stock.purchasePrice.toStringAsFixed(0)}원',
-                    style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                leading: CircleAvatar(
+                  backgroundColor: Colors.blue.withOpacity(0.2),
+                  child: Text(
+                    stock.symbol.substring(0, stock.symbol.length > 2 ? 2 : stock.symbol.length),
+                    style: const TextStyle(color: Colors.blue, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                title: Text(
+                    stock.name.isNotEmpty ? stock.name : stock.symbol,
+                    style: theme.textTheme.titleMedium?.copyWith(color: titleColor)
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        '${stock.quantity.toStringAsFixed(0)}주 × \$${stock.purchasePrice.toStringAsFixed(2)}',
+                        style: theme.textTheme.bodySmall?.copyWith(color: textColor)
+                    ),
+                    Text(
+                        '평가금액: \$${stock.evaluationAmount.toStringAsFixed(2)}',
+                        style: theme.textTheme.bodySmall?.copyWith(color: textColor, fontSize: 11)
+                    ),
+                  ],
+                ),
                 trailing: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('₩${stock.currentPrice.toStringAsFixed(0)}',
+                    Text(
+                        '\$${stock.currentPrice.toStringAsFixed(2)}',
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.bold,
-                          color: stock.profitLoss >= 0 ? Colors.redAccent : Colors.blueAccent,
-                        )),
+                          color: titleColor,
+                        )
+                    ),
                     Text(
-                      '${stock.profitLoss >= 0 ? '+' : ''}${stock.profitLoss.toStringAsFixed(0)} (${stock.profitLossRate.toStringAsFixed(2)}%)',
+                      '${stock.profitLoss >= 0 ? '+' : ''}\$${stock.profitLoss.toStringAsFixed(2)}',
                       style: TextStyle(
-                        fontSize: 12,
-                        color: stock.profitLoss >= 0 ? Colors.redAccent : Colors.blueAccent,
+                        fontSize: 11,
+                        color: stock.profitLoss >= 0 ? Colors.green : Colors.red,
+                      ),
+                    ),
+                    Text(
+                      '${stock.profitLossRate.toStringAsFixed(2)}%',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: stock.profitLoss >= 0 ? Colors.green : Colors.red,
                       ),
                     ),
                   ],
                 ),
                 onTap: () {
-                  // 종목 상세 페이지로 이동 (구현 필요)
-                  print('Tapped on ${stock.symbol}');
+                  _showStockDetail(stock);
+                },
+                onLongPress: () {
+                  _showDeleteDialog(stock);
                 },
               ),
             );
@@ -339,19 +524,64 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     );
   }
 
-  Widget _buildRebalanceButton(ThemeData theme) {
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        minimumSize: const Size(double.infinity, 50),
-        backgroundColor: theme.colorScheme.primary,
-        foregroundColor: theme.colorScheme.onPrimary,
-      ),
-      onPressed: _isLoading ? null : () {
-        // 리밸런싱 페이지로 이동 또는 기능 실행
-        print('리밸런싱 버튼 클릭됨');
-        // 예: Navigator.push(context, MaterialPageRoute(builder: (context) => RebalancePage()));
+  void _showStockDetail(StockAsset stock) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('${stock.symbol} 상세 정보'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('종목명: ${stock.name.isNotEmpty ? stock.name : stock.symbol}'),
+              Text('보유수량: ${stock.quantity.toStringAsFixed(0)}주'),
+              Text('평균매수가: \$${stock.purchasePrice.toStringAsFixed(2)}'),
+              Text('현재가: \$${stock.currentPrice.toStringAsFixed(2)}'),
+              Text('평가금액: \$${stock.evaluationAmount.toStringAsFixed(2)}'),
+              Text('평가손익: ${stock.profitLoss >= 0 ? '+' : ''}\$${stock.profitLoss.toStringAsFixed(2)}'),
+              Text('수익률: ${stock.profitLossRate.toStringAsFixed(2)}%'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('닫기'),
+            ),
+          ],
+        );
       },
-      child: const Text('포트폴리오 리밸런싱 하기', style: TextStyle(fontSize: 16)),
+    );
+  }
+
+  void _showDeleteDialog(StockAsset stock) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('종목 삭제'),
+          content: Text('${stock.symbol}을(를) 포트폴리오에서 삭제하시겠습니까?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _assetRepository.deleteAsset(stock.id);
+                _loadAssets();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('${stock.symbol}이(가) 삭제되었습니다.')),
+                  );
+                }
+              },
+              child: const Text('삭제', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
     );
   }
 }

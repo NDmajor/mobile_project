@@ -1,101 +1,189 @@
-// lib/services/alpha_vantage_service.dart
+// lib/service/alpha_vantage_service.dart
 import 'dart:convert';
-import 'package:alpha_vantage_api/alpha_vantage_api.dart' as alpha_api;
-import 'package:stock_rebalence/models/stock_holding.dart'; // StockHolding 모델 필요 시
+import 'package:http/http.dart' as http;
 
 // Alpha Vantage 검색 결과를 담을 모델
 class AlphaStockSearchResult {
   final String symbol;
   final String name;
+  final String type;
   final String region;
+  final String marketOpen;
+  final String marketClose;
+  final String timezone;
   final String currency;
+  final String matchScore;
 
   AlphaStockSearchResult({
     required this.symbol,
     required this.name,
+    required this.type,
     required this.region,
+    required this.marketOpen,
+    required this.marketClose,
+    required this.timezone,
     required this.currency,
+    required this.matchScore,
   });
 
-  // Alpha Vantage API의 SYMBOL_SEARCH 응답 구조에 맞춰 수정
-  factory AlphaStockSearchResult.fromMap(Map<String, dynamic> map) {
+  factory AlphaStockSearchResult.fromJson(Map<String, dynamic> json) {
     return AlphaStockSearchResult(
-      symbol: map['1. symbol'] ?? '',
-      name: map['2. name'] ?? '',
-      region: map['4. region'] ?? '',
-      currency: map['8. currency'] ?? '',
+      symbol: json['1. symbol'] ?? '',
+      name: json['2. name'] ?? '',
+      type: json['3. type'] ?? '',
+      region: json['4. region'] ?? '',
+      marketOpen: json['5. marketOpen'] ?? '',
+      marketClose: json['6. marketClose'] ?? '',
+      timezone: json['7. timezone'] ?? '',
+      currency: json['8. currency'] ?? '',
+      matchScore: json['9. matchScore'] ?? '',
+    );
+  }
+}
+
+// 주식 현재가 정보를 담을 모델
+class StockQuote {
+  final String symbol;
+  final double open;
+  final double high;
+  final double low;
+  final double price;
+  final int volume;
+  final String latestTradingDay;
+  final double previousClose;
+  final double change;
+  final String changePercent;
+
+  StockQuote({
+    required this.symbol,
+    required this.open,
+    required this.high,
+    required this.low,
+    required this.price,
+    required this.volume,
+    required this.latestTradingDay,
+    required this.previousClose,
+    required this.change,
+    required this.changePercent,
+  });
+
+  factory StockQuote.fromJson(Map<String, dynamic> json) {
+    return StockQuote(
+      symbol: json['01. symbol'] ?? '',
+      open: double.tryParse(json['02. open'] ?? '0') ?? 0.0,
+      high: double.tryParse(json['03. high'] ?? '0') ?? 0.0,
+      low: double.tryParse(json['04. low'] ?? '0') ?? 0.0,
+      price: double.tryParse(json['05. price'] ?? '0') ?? 0.0,
+      volume: int.tryParse(json['06. volume'] ?? '0') ?? 0,
+      latestTradingDay: json['07. latest trading day'] ?? '',
+      previousClose: double.tryParse(json['08. previous close'] ?? '0') ?? 0.0,
+      change: double.tryParse(json['09. change'] ?? '0') ?? 0.0,
+      changePercent: json['10. change percent'] ?? '0.00%',
     );
   }
 }
 
 class AlphaVantageService {
   final String _apiKey = '3LBPRW67CKY5RG2Y';
-  late final alpha_api.AlphaVantageAPI _alphaVantageAPI;
-
-  AlphaVantageService() {
-    _alphaVantageAPI = alpha_api.AlphaVantageAPI(apiKey: _apiKey);
-  }
+  final String _baseUrl = 'https://www.alphavantage.co/query';
 
   // 종목 검색 (Symbol Search)
   Future<List<AlphaStockSearchResult>> searchStocks(String keywords) async {
     if (keywords.isEmpty) {
       return [];
     }
-    try {
-      final response = await _alphaVantageAPI.symbolSearch(keywords); // 패키지에서 제공하는 함수 호출
 
-      // 패키지의 응답 타입과 구조를 확인해야 합니다.
-      // 아래는 일반적인 Map<String, dynamic> 리스트를 가정하고 처리하는 예시입니다.
-      // 실제 패키지가 SearchResult 객체 리스트를 반환한다면, 그에 맞게 수정해야 합니다.
-      if (response is Map<String, dynamic> && response.containsKey('bestMatches')) {
-        final List<dynamic> bestMatches = response['bestMatches'];
-        return bestMatches
-            .map((item) => AlphaStockSearchResult.fromMap(item as Map<String, dynamic>))
-            .where((stock) => stock.region.toLowerCase().contains("united states") && stock.currency == "USD") // 미국 주식, USD 통화 필터링 (예시)
-            .toList();
-      } else if (response is Map<String, dynamic> && response.containsKey('Note')) {
-        print('Alpha Vantage API Note (Symbol Search): ${response['Note']}');
-        // API 호출 빈도 제한에 걸렸을 수 있습니다. 사용자에게 알리거나 재시도 로직을 고려하세요.
-        return [];
+    try {
+      final url = Uri.parse(
+          '$_baseUrl?function=SYMBOL_SEARCH&keywords=$keywords&apikey=$_apiKey');
+
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+
+        // API 제한 메시지 확인
+        if (data.containsKey('Note')) {
+          print('Alpha Vantage API Note: ${data['Note']}');
+          throw Exception('API 호출 제한: ${data['Note']}');
+        }
+
+        if (data.containsKey('bestMatches')) {
+          final List<dynamic> bestMatches = data['bestMatches'];
+          return bestMatches
+              .map((item) => AlphaStockSearchResult.fromJson(item))
+              .where((stock) =>
+          stock.region.toLowerCase().contains('united states') ||
+              stock.currency == 'USD')
+              .toList();
+        }
       }
-      print('Unexpected response format from Alpha Vantage symbol search: $response');
-      return [];
-    } catch (e) {
-      print('Error searching stocks (Alpha Vantage): $e');
-      return []; // 오류 발생 시 빈 리스트 반환
+
+      throw Exception('검색 결과를 가져올 수 없습니다.');
+    } catch (e, stackTrace) {
+      print('===== Original Error in AlphaVantageService =====');
+      print('Error Type: ${e.runtimeType}');
+      print('Error Message: ${e.toString()}');
+      print('Stack Trace: $stackTrace');
+      print('=================================================');
+      throw Exception('검색 결과를 가져올 수 없습니다.');
     }
   }
 
-  // 주식 현재가 및 정보 가져오기 (Global Quote)
-  Future<Map<String, dynamic>> fetchStockData(String symbol) async {
+  // 주식 현재가 가져오기 (Global Quote)
+  Future<StockQuote?> getStockQuote(String symbol) async {
     if (symbol.isEmpty) {
-      return {'currentPrice': 0.0, 'name': symbol, 'error': 'Symbol is empty'};
+      return null;
     }
-    try {
-      final response = await _alphaVantageAPI.globalQuote(symbol); // 패키지 함수 호출
 
-      // 패키지의 응답 타입과 구조 확인 필요
-      // 아래는 Map<String, dynamic> 형태의 응답을 가정
-      if (response is Map<String, dynamic> && response.containsKey('Global Quote')) {
-        final Map<String, dynamic> globalQuote = response['Global Quote'];
-        if (globalQuote.isNotEmpty) {
-          return {
-            'symbol': globalQuote['01. symbol'] ?? symbol,
-            'name': symbol, // GLOBAL_QUOTE는 종목명을 주지 않으므로, 검색 시 가져온 이름을 사용하거나 symbol로 대체
-            'currentPrice': double.tryParse(globalQuote['05. price'] ?? '0.0') ?? 0.0,
-            'previousClose': double.tryParse(globalQuote['08. previous close'] ?? '0.0') ?? 0.0,
-            'changePercent': globalQuote['10. change percent'] ?? '0.00%',
-          };
+    try {
+      final url = Uri.parse(
+          '$_baseUrl?function=GLOBAL_QUOTE&symbol=$symbol&apikey=$_apiKey');
+
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+
+        // API 제한 메시지 확인
+        if (data.containsKey('Note')) {
+          print('Alpha Vantage API Note: ${data['Note']}');
+          throw Exception('API 호출 제한: ${data['Note']}');
         }
-      } else if (response is Map<String, dynamic> && response.containsKey('Note')) {
-        print('Alpha Vantage API Note (Global Quote for $symbol): ${response['Note']}');
-        return {'currentPrice': 0.0, 'name': symbol, 'error': response['Note']};
+
+        if (data.containsKey('Global Quote')) {
+          final Map<String, dynamic> globalQuote = data['Global Quote'];
+          if (globalQuote.isNotEmpty) {
+            return StockQuote.fromJson(globalQuote);
+          }
+        }
       }
-      print('Unexpected response format or empty quote for $symbol: $response');
-      return {'currentPrice': 0.0, 'name': symbol, 'error': 'No quote data found'};
+
+      return null;
     } catch (e) {
-      print('Error fetching stock data (Alpha Vantage for $symbol): $e');
-      return {'currentPrice': 0.0, 'name': symbol, 'error': 'Exception occurred'};
+      print('주식 현재가 조회 오류: $e');
+      rethrow;
+    }
+  }
+
+  // 여러 종목의 현재가를 한번에 업데이트 (기존 코드와의 호환성을 위해)
+  Future<Map<String, dynamic>> fetchStockData(String symbol) async {
+    try {
+      final quote = await getStockQuote(symbol);
+      if (quote != null) {
+        return {
+          'symbol': quote.symbol,
+          'name': symbol, // 종목명은 별도로 저장하거나 검색에서 가져와야 함
+          'currentPrice': quote.price,
+          'previousClose': quote.previousClose,
+          'changePercent': quote.changePercent,
+          'change': quote.change,
+          'volume': quote.volume,
+        };
+      }
+      return {'currentPrice': 0.0, 'name': symbol, 'error': 'No data found'};
+    } catch (e) {
+      return {'currentPrice': 0.0, 'name': symbol, 'error': e.toString()};
     }
   }
 }
