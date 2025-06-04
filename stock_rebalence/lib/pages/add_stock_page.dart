@@ -38,6 +38,7 @@ class _AddStockPageState extends State<AddStockPage> {
     if (query.length < 2) {
       setState(() {
         _searchResults = [];
+        _errorMessage = null;
       });
       return;
     }
@@ -48,23 +49,43 @@ class _AddStockPageState extends State<AddStockPage> {
     });
 
     try {
+      // API 연결 테스트 (선택사항)
+      final isApiWorking = await _alphaVantageService.testApiConnection();
+      if (!isApiWorking) {
+        throw Exception('API 서버에 연결할 수 없습니다. 나중에 다시 시도해주세요.');
+      }
+
       final results = await _alphaVantageService.searchStocks(query);
       if (mounted) {
         setState(() {
           _searchResults = results;
           _isSearching = false;
+          if (results.isEmpty) {
+            _errorMessage = '검색 결과가 없습니다. 다른 키워드로 검색해보세요.';
+          }
         });
       }
     } catch (e, s) {
       if (mounted) {
         print('주식 검색 상세 오류: $e');
         print('StackTrace: $s');
+
+        String userMessage;
+        if (e.toString().contains('네트워크')) {
+          userMessage = '인터넷 연결을 확인해주세요.';
+        } else if (e.toString().contains('API 호출 제한') || e.toString().contains('API 제한')) {
+          userMessage = 'API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.';
+        } else if (e.toString().contains('시간이 초과')) {
+          userMessage = '요청 시간이 초과되었습니다. 다시 시도해주세요.';
+        } else {
+          userMessage = '검색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+        }
+
         setState(() {
           _isSearching = false;
-          _errorMessage = '검색 중 오류가 발생했습니다: ${e.toString()}'; // 사용자에게는 간략한 메시지
+          _errorMessage = userMessage;
           _searchResults = [];
         });
-
       }
     }
   }
