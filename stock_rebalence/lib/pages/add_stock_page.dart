@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:stock_rebalence/models/asset.dart';
 import 'package:stock_rebalence/service/asset_repository.dart';
-import 'package:stock_rebalence/service/polygon_service.dart'; // Polygon.io 서비스로 변경
+import 'package:stock_rebalence/service/yahoo_finance_service.dart';
 
 class AddStockPage extends StatefulWidget {
   const AddStockPage({super.key});
@@ -18,10 +18,10 @@ class _AddStockPageState extends State<AddStockPage> {
   final _purchasePriceController = TextEditingController();
 
   final AssetRepository _assetRepository = AssetRepository();
-  final PolygonService _polygonService = PolygonService(); // Polygon 서비스로 변경
+  final YahooFinanceService _yahooService = YahooFinanceService();
 
-  List<PolygonTickerResult> _searchResults = []; // Polygon 모델로 변경
-  PolygonTickerResult? _selectedStock; // Polygon 모델로 변경
+  List<YahooSearchResult> _searchResults = [];
+  YahooSearchResult? _selectedStock;
   bool _isSearching = false;
   bool _isSaving = false;
   String? _errorMessage;
@@ -35,7 +35,7 @@ class _AddStockPageState extends State<AddStockPage> {
   }
 
   Future<void> _searchStocks(String query) async {
-    if (query.length < 1) { // Polygon은 1글자부터 검색 가능
+    if (query.length < 1) {
       setState(() {
         _searchResults = [];
         _errorMessage = null;
@@ -49,19 +49,18 @@ class _AddStockPageState extends State<AddStockPage> {
     });
 
     try {
-      // API 연결 테스트 (선택사항)
-      final isApiWorking = await _polygonService.testApiConnection();
+      final isApiWorking = await _yahooService.testApiConnection();
       if (!isApiWorking) {
-        throw Exception('API 서버에 연결할 수 없습니다. API 키를 확인하거나 나중에 다시 시도해주세요.');
+        throw Exception('API 서버에 연결할 수 없음');
       }
 
-      final results = await _polygonService.searchStocks(query);
+      final results = await _yahooService.searchStocks(query);
       if (mounted) {
         setState(() {
           _searchResults = results;
           _isSearching = false;
           if (results.isEmpty) {
-            _errorMessage = '검색 결과가 없습니다. 다른 키워드로 검색해보세요.';
+            _errorMessage = '검색 결과가 없음';
           }
         });
       }
@@ -72,15 +71,11 @@ class _AddStockPageState extends State<AddStockPage> {
 
         String userMessage;
         if (e.toString().contains('네트워크')) {
-          userMessage = '인터넷 연결을 확인해주세요.';
-        } else if (e.toString().contains('API 호출 제한') || e.toString().contains('API 제한')) {
-          userMessage = 'API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.';
-        } else if (e.toString().contains('API 키')) {
-          userMessage = 'API 키가 유효하지 않습니다. 설정을 확인해주세요.';
+          userMessage = '인터넷 연결을 확인';
         } else if (e.toString().contains('시간이 초과')) {
-          userMessage = '요청 시간이 초과되었습니다. 다시 시도해주세요.';
+          userMessage = '요청 시간이 초과';
         } else {
-          userMessage = '검색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+          userMessage = '검색 중 오류가 발생';
         }
 
         setState(() {
@@ -92,10 +87,10 @@ class _AddStockPageState extends State<AddStockPage> {
     }
   }
 
-  void _selectStock(PolygonTickerResult stock) {
+  void _selectStock(YahooSearchResult stock) {
     setState(() {
       _selectedStock = stock;
-      _searchController.text = '${stock.ticker} - ${stock.name}';
+      _searchController.text = '${stock.symbol} - ${stock.name}';
       _searchResults = [];
     });
   }
@@ -109,56 +104,58 @@ class _AddStockPageState extends State<AddStockPage> {
 
       try {
         final quantity = double.tryParse(_quantityController.text) ?? 0;
-        final purchasePrice = double.tryParse(_purchasePriceController.text) ?? 0;
+        final purchasePrice = double.tryParse(_purchasePriceController.text) ??
+            0;
 
         if (quantity > 0 && purchasePrice > 0) {
-          // 현재가 가져오기 (선택사항)
-          double currentPrice = purchasePrice; // 기본값은 매수가
+          double currentPrice = purchasePrice;
           try {
-            final quote = await _polygonService.getStockQuote(_selectedStock!.ticker);
+            final quote = await _yahooService.getStockQuote(
+                _selectedStock!.symbol);
             currentPrice = quote?.price ?? purchasePrice;
           } catch (e) {
             print('현재가 조회 실패: $e');
-            // 현재가 조회 실패해도 저장은 진행
           }
 
-          // StockAsset 생성
           final newStockAsset = StockAsset(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            symbol: _selectedStock!.ticker,
+            id: DateTime
+                .now()
+                .millisecondsSinceEpoch
+                .toString(),
+            symbol: _selectedStock!.symbol,
             name: _selectedStock!.name,
             quantity: quantity,
             purchasePrice: purchasePrice,
             purchaseDate: DateTime.now(),
             currentPrice: currentPrice,
-            exchange: _selectedStock!.primaryExchange.isNotEmpty
-                ? _selectedStock!.primaryExchange
-                : 'NASDAQ', // 기본값
+            exchange: _selectedStock!.exchange.isNotEmpty
+                ? _selectedStock!.exchange
+                : 'NASDAQ',
           );
 
-          // 중복 종목 체크
           List<Asset> currentAssets = await _assetRepository.getAssets();
           bool isDuplicate = currentAssets.any((asset) =>
           asset.type == AssetType.stock &&
-              (asset as StockAsset).symbol.toLowerCase() == newStockAsset.symbol.toLowerCase());
+              (asset as StockAsset).symbol.toLowerCase() ==
+                  newStockAsset.symbol.toLowerCase());
 
           if (isDuplicate) {
             if (mounted) {
               setState(() {
                 _isSaving = false;
-                _errorMessage = '이미 보유 중인 종목입니다.';
+                _errorMessage = '이미 보유 중인 종목';
               });
             }
             return;
           }
 
-          // 통합 자산 저장소에 저장
           await _assetRepository.addAsset(newStockAsset);
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('${newStockAsset.symbol} (${newStockAsset.name}) 추가됨'),
+                content: Text(
+                    '${newStockAsset.symbol} (${newStockAsset.name}) 추가됨'),
                 backgroundColor: Colors.green,
               ),
             );
@@ -174,13 +171,13 @@ class _AddStockPageState extends State<AddStockPage> {
         if (mounted) {
           setState(() {
             _isSaving = false;
-            _errorMessage = '저장 중 오류가 발생했습니다: ${e.toString()}';
+            _errorMessage = '저장 중 오류가 발생: ${e.toString()}';
           });
         }
       }
     } else if (_selectedStock == null) {
       setState(() {
-        _errorMessage = '종목을 선택해주세요.';
+        _errorMessage = '종목을 선택';
       });
     }
   }
@@ -210,17 +207,12 @@ class _AddStockPageState extends State<AddStockPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '종목 검색',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: _searchController,
                         decoration: InputDecoration(
-                          labelText: '종목명 또는 심볼 검색 (예: Apple, AAPL)',
+                          labelText: '종목명 또는 심볼 검색',
                           prefixIcon: const Icon(Icons.search),
                           suffixIcon: _isSearching
                               ? const SizedBox(
@@ -243,7 +235,7 @@ class _AddStockPageState extends State<AddStockPage> {
                         },
                         validator: (value) {
                           if (_selectedStock == null) {
-                            return '종목을 선택해주세요.';
+                            return '종목을 선택';
                           }
                           return null;
                         },
@@ -260,22 +252,25 @@ class _AddStockPageState extends State<AddStockPage> {
                           child: ListView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _searchResults.length > 10 ? 10 : _searchResults.length,
+                            itemCount: _searchResults.length > 10
+                                ? 10
+                                : _searchResults.length,
                             itemBuilder: (context, index) {
                               final stock = _searchResults[index];
                               return ListTile(
                                 dense: true,
                                 title: Text(
-                                  '${stock.ticker} - ${stock.name}',
-                                  style: const TextStyle(fontWeight: FontWeight.w500),
+                                  '${stock.symbol} - ${stock.name}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w500),
                                 ),
                                 subtitle: Text(
-                                  '${stock.type} | ${stock.primaryExchange} | ${stock.currencyName ?? 'USD'}',
+                                  '${stock.type} | ${stock.exchange}',
                                   style: theme.textTheme.bodySmall,
                                 ),
-                                trailing: stock.active
-                                    ? const Icon(Icons.check_circle, color: Colors.green, size: 16)
-                                    : const Icon(Icons.pause_circle, color: Colors.orange, size: 16),
+                                trailing: const Icon(
+                                    Icons.check_circle, color: Colors.green,
+                                    size: 16),
                                 onTap: () => _selectStock(stock),
                               );
                             },
@@ -289,7 +284,8 @@ class _AddStockPageState extends State<AddStockPage> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: theme.colorScheme.primaryContainer.withOpacity(0.3),
+                            color: theme.colorScheme.primaryContainer
+                                .withOpacity(0.3),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(
@@ -305,8 +301,9 @@ class _AddStockPageState extends State<AddStockPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '선택된 종목: ${_selectedStock!.ticker}',
-                                      style: theme.textTheme.titleSmall?.copyWith(
+                                      '선택된 종목: ${_selectedStock!.symbol}',
+                                      style: theme.textTheme.titleSmall
+                                          ?.copyWith(
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
@@ -315,8 +312,10 @@ class _AddStockPageState extends State<AddStockPage> {
                                       style: theme.textTheme.bodySmall,
                                     ),
                                     Text(
-                                      '${_selectedStock!.primaryExchange} | ${_selectedStock!.type}',
-                                      style: theme.textTheme.bodySmall?.copyWith(
+                                      '${_selectedStock!
+                                          .exchange} | ${_selectedStock!.type}',
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
                                         color: Colors.grey[600],
                                       ),
                                     ),
@@ -368,10 +367,11 @@ class _AddStockPageState extends State<AddStockPage> {
                         keyboardType: TextInputType.number,
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return '보유 수량을 입력하세요.';
+                            return '보유 수량을 입력';
                           }
-                          if (double.tryParse(value) == null || double.parse(value) <= 0) {
-                            return '유효한 수량을 입력하세요.';
+                          if (double.tryParse(value) == null || double.parse(
+                              value) <= 0) {
+                            return '유효한 수량을 입력';
                           }
                           return null;
                         },
@@ -384,13 +384,15 @@ class _AddStockPageState extends State<AddStockPage> {
                           prefixText: '\$ ',
                           border: OutlineInputBorder(),
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return '평균 매수가를 입력하세요.';
+                            return '평균 매수가를 입력';
                           }
-                          if (double.tryParse(value) == null || double.parse(value) <= 0) {
-                            return '유효한 매수가를 입력하세요.';
+                          if (double.tryParse(value) == null || double.parse(
+                              value) <= 0) {
+                            return '유효한 매수가를 입력';
                           }
                           return null;
                         },
@@ -452,7 +454,6 @@ class _AddStockPageState extends State<AddStockPage> {
 
               const SizedBox(height: 16),
 
-              // 도움말
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -465,7 +466,8 @@ class _AddStockPageState extends State<AddStockPage> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.info_outline, color: Colors.blue.shade700, size: 16),
+                        Icon(Icons.info_outline, color: Colors.blue.shade700,
+                            size: 16),
                         const SizedBox(width: 8),
                         Text(
                           '도움말',

@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:stock_rebalence/models/asset.dart';
 import 'package:stock_rebalence/pages/add_stock_page.dart';
 import 'package:stock_rebalence/service/asset_repository.dart';
-import 'package:stock_rebalence/service/polygon_service.dart';
+import 'package:stock_rebalence/service/yahoo_finance_service.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
-//호에엥
+
 class AccountStatusPage extends StatefulWidget {
   const AccountStatusPage({super.key});
 
@@ -15,7 +15,7 @@ class AccountStatusPage extends StatefulWidget {
 
 class _AccountStatusPageState extends State<AccountStatusPage> {
   final AssetRepository _assetRepository = AssetRepository();
-  final PolygonService _polygonService = PolygonService();
+  final YahooFinanceService _yahooService = YahooFinanceService();
 
   List<Asset> _allAssets = [];
   List<StockAsset> _stockAssets = [];
@@ -42,26 +42,21 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     });
 
     try {
-      // 모든 자산 로드
       _allAssets = await _assetRepository.getAssets();
 
-      // 주식 자산필터링
       _stockAssets = _allAssets
           .where((asset) => asset.type == AssetType.stock)
           .cast<StockAsset>()
           .toList();
 
-      // 현재가 업데이트
-      await _updateStockPrices();
-
-      //총합
+      await _updateStockPricesWithYahoo();
       _calculateTotals();
     } catch (e) {
       print('자산 로딩 오류: $e');
-      if (mounted) { //디디디디디버깅
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('자산 로딩 중 오류가 발생했습니다: ${e.toString()}'),
+            content: Text('자산 로딩 중 오류가 발생: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -74,19 +69,43 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
     });
   }
 
-  Future<void> _updateStockPrices() async {
-    for (var stockAsset in _stockAssets) {
-      try {
-        final quote = await _polygonService.getStockQuote(stockAsset.symbol);
+  Future<void> _updateStockPricesWithYahoo() async {
+    if (_stockAssets.isEmpty) return;
+
+    try {
+      List<String> symbols = _stockAssets.map((stock) => stock.symbol).toList();
+      Map<String, YahooQuote?> quotes = await _yahooService.getMultipleQuotes(symbols);
+
+      for (var stockAsset in _stockAssets) {
+        final quote = quotes[stockAsset.symbol.toUpperCase()];
         if (quote != null) {
           stockAsset.currentPrice = quote.price;
+          print('${stockAsset.symbol} 현재가 업데이트: ${quote.price}');
+        } else {
+          print('${stockAsset.symbol} 현재가 조회 실패');
         }
-        await Future.delayed(const Duration(milliseconds: 1000));
-      } catch (e) {
-        print('${stockAsset.symbol} 가격 업데이트 실패: $e');
       }
+
+      await _assetRepository.saveAssets(_allAssets);
+
+    } catch (e) {
+      print('가격 업데이트 실패: $e');
+
+      // 개별 조회 fallback
+      for (var stockAsset in _stockAssets) {
+        try {
+          final quote = await _yahooService.getStockQuote(stockAsset.symbol);
+          if (quote != null) {
+            stockAsset.currentPrice = quote.price;
+          } //혹시 몰라 딜레이
+          await Future.delayed(const Duration(milliseconds: 200));
+        } catch (e) {
+          print('${stockAsset.symbol} 개별 가격 업데이트 실패: $e');
+        }
+      }
+
+      await _assetRepository.saveAssets(_allAssets);
     }
-    await _assetRepository.saveAssets(_allAssets);
   }
 
   void _calculateTotals() {
@@ -168,11 +187,6 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
             onPressed: _isLoading ? null : _loadAssets,
             tooltip: '데이터 새로고침',
           ),
-          IconButton(
-            icon: Icon(Icons.settings_outlined, color: titleColor),
-            onPressed: () {
-            },
-          ),
         ],
       ),
       body: RefreshIndicator(
@@ -188,7 +202,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
             _buildAssetOverview(theme, cardBackgroundColor, textColor, titleColor),
             const SizedBox(height: 24),
             _buildStockHoldingsList(theme, cardBackgroundColor, textColor, titleColor),
-            const SizedBox(height: 100), // 오류로 인한 여백추가
+            const SizedBox(height: 100), // 여백
           ],
         ),
       ),
@@ -232,12 +246,13 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+                  )
+                ,
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              '\$${_totalAssets.toStringAsFixed(2)}',
+              '${_totalAssets.toStringAsFixed(2)}',
               style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold, color: titleColor),
             ),
             const SizedBox(height: 16),
@@ -248,7 +263,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('투자 원금', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
-                    Text('\$${_totalPurchaseAmount.toStringAsFixed(2)}', style: theme.textTheme.titleSmall?.copyWith(color: titleColor)),
+                    Text('${_totalPurchaseAmount.toStringAsFixed(2)}', style: theme.textTheme.titleSmall?.copyWith(color: titleColor)),
                   ],
                 ),
                 Column(
@@ -256,7 +271,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                   children: [
                     Text('평가 손익', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
                     Text(
-                      '${_totalProfitLoss >= 0 ? '+' : ''}\$${_totalProfitLoss.toStringAsFixed(2)} (${_overallProfitLossRate.toStringAsFixed(2)}%)',
+                      '${_totalProfitLoss >= 0 ? '+' : ''}${_totalProfitLoss.toStringAsFixed(2)} (${_overallProfitLossRate.toStringAsFixed(2)}%)',
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: _totalProfitLoss >= 0 ? Colors.green : Colors.red,
                       ),
@@ -377,7 +392,7 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                         ),
                       ),
                       Text(
-                        '\$${amount.toStringAsFixed(2)}',
+                        '${amount.toStringAsFixed(2)}',
                         style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: titleColor),
                       ),
                     ],
@@ -475,11 +490,11 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                        '${stock.quantity.toStringAsFixed(0)}주 × \$${stock.purchasePrice.toStringAsFixed(2)}',
+                        '${stock.quantity.toStringAsFixed(0)}주 × ${stock.purchasePrice.toStringAsFixed(2)}',
                         style: theme.textTheme.bodySmall?.copyWith(color: textColor)
                     ),
                     Text(
-                        '평가금액: \$${stock.evaluationAmount.toStringAsFixed(2)}',
+                        '평가금액: ${stock.evaluationAmount.toStringAsFixed(2)}',
                         style: theme.textTheme.bodySmall?.copyWith(color: textColor, fontSize: 11)
                     ),
                   ],
@@ -489,14 +504,14 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                        '\$${stock.currentPrice.toStringAsFixed(2)}',
+                        '${stock.currentPrice.toStringAsFixed(2)}',
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: titleColor,
                         )
                     ),
                     Text(
-                      '${stock.profitLoss >= 0 ? '+' : ''}\$${stock.profitLoss.toStringAsFixed(2)}',
+                      '${stock.profitLoss >= 0 ? '+' : ''}${stock.profitLoss.toStringAsFixed(2)}',
                       style: TextStyle(
                         fontSize: 11,
                         color: stock.profitLoss >= 0 ? Colors.green : Colors.red,
@@ -537,13 +552,21 @@ class _AccountStatusPageState extends State<AccountStatusPage> {
             children: [
               Text('종목명: ${stock.name.isNotEmpty ? stock.name : stock.symbol}'),
               Text('보유수량: ${stock.quantity.toStringAsFixed(0)}주'),
-              Text('평균매수가: \$${stock.purchasePrice.toStringAsFixed(2)}'),
-              Text('현재가: \$${stock.currentPrice.toStringAsFixed(2)}'),
-              Text('평가금액: \$${stock.evaluationAmount.toStringAsFixed(2)}'),
-              Text('평가손익: ${stock.profitLoss >= 0 ? '+' : ''}\$${stock.profitLoss.toStringAsFixed(2)}'),
+              Text('평균매수가: ${stock.purchasePrice.toStringAsFixed(2)}'),
+              Text('현재가: ${stock.currentPrice.toStringAsFixed(2)} (Yahoo Finance)'),
+              Text('평가금액: ${stock.evaluationAmount.toStringAsFixed(2)}'),
+              Text('평가손익: ${stock.profitLoss >= 0 ? '+' : ''}${stock.profitLoss.toStringAsFixed(2)}'),
               Text('수익률: ${stock.profitLossRate.toStringAsFixed(2)}%'),
               const SizedBox(height: 8),
               Text('거래소: ${stock.exchange}', style: Theme.of(context).textTheme.bodySmall),
+              const Divider(),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
             ],
           ),
           actions: [
