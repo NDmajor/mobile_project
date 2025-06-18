@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:stock_rebalence/models/asset.dart';
 import 'package:stock_rebalence/service/asset_repository.dart';
-import 'package:stock_rebalence/service/alpha_vantage_service.dart';
+import 'package:stock_rebalence/service/polygon_service.dart'; // Polygon.io 서비스로 변경
 
 class AddStockPage extends StatefulWidget {
   const AddStockPage({super.key});
@@ -17,11 +17,11 @@ class _AddStockPageState extends State<AddStockPage> {
   final _quantityController = TextEditingController();
   final _purchasePriceController = TextEditingController();
 
-  final AssetRepository _assetRepository = AssetRepository(); // 통합 자산 저장소 사용
-  final AlphaVantageService _alphaVantageService = AlphaVantageService();
+  final AssetRepository _assetRepository = AssetRepository();
+  final PolygonService _polygonService = PolygonService(); // Polygon 서비스로 변경
 
-  List<AlphaStockSearchResult> _searchResults = [];
-  AlphaStockSearchResult? _selectedStock;
+  List<PolygonTickerResult> _searchResults = []; // Polygon 모델로 변경
+  PolygonTickerResult? _selectedStock; // Polygon 모델로 변경
   bool _isSearching = false;
   bool _isSaving = false;
   String? _errorMessage;
@@ -35,7 +35,7 @@ class _AddStockPageState extends State<AddStockPage> {
   }
 
   Future<void> _searchStocks(String query) async {
-    if (query.length < 2) {
+    if (query.length < 1) { // Polygon은 1글자부터 검색 가능
       setState(() {
         _searchResults = [];
         _errorMessage = null;
@@ -50,12 +50,12 @@ class _AddStockPageState extends State<AddStockPage> {
 
     try {
       // API 연결 테스트 (선택사항)
-      final isApiWorking = await _alphaVantageService.testApiConnection();
+      final isApiWorking = await _polygonService.testApiConnection();
       if (!isApiWorking) {
-        throw Exception('API 서버에 연결할 수 없습니다. 나중에 다시 시도해주세요.');
+        throw Exception('API 서버에 연결할 수 없습니다. API 키를 확인하거나 나중에 다시 시도해주세요.');
       }
 
-      final results = await _alphaVantageService.searchStocks(query);
+      final results = await _polygonService.searchStocks(query);
       if (mounted) {
         setState(() {
           _searchResults = results;
@@ -75,6 +75,8 @@ class _AddStockPageState extends State<AddStockPage> {
           userMessage = '인터넷 연결을 확인해주세요.';
         } else if (e.toString().contains('API 호출 제한') || e.toString().contains('API 제한')) {
           userMessage = 'API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.';
+        } else if (e.toString().contains('API 키')) {
+          userMessage = 'API 키가 유효하지 않습니다. 설정을 확인해주세요.';
         } else if (e.toString().contains('시간이 초과')) {
           userMessage = '요청 시간이 초과되었습니다. 다시 시도해주세요.';
         } else {
@@ -90,10 +92,10 @@ class _AddStockPageState extends State<AddStockPage> {
     }
   }
 
-  void _selectStock(AlphaStockSearchResult stock) {
+  void _selectStock(PolygonTickerResult stock) {
     setState(() {
       _selectedStock = stock;
-      _searchController.text = '${stock.symbol} - ${stock.name}';
+      _searchController.text = '${stock.ticker} - ${stock.name}';
       _searchResults = [];
     });
   }
@@ -113,7 +115,7 @@ class _AddStockPageState extends State<AddStockPage> {
           // 현재가 가져오기 (선택사항)
           double currentPrice = purchasePrice; // 기본값은 매수가
           try {
-            final quote = await _alphaVantageService.getStockQuote(_selectedStock!.symbol);
+            final quote = await _polygonService.getStockQuote(_selectedStock!.ticker);
             currentPrice = quote?.price ?? purchasePrice;
           } catch (e) {
             print('현재가 조회 실패: $e');
@@ -123,13 +125,15 @@ class _AddStockPageState extends State<AddStockPage> {
           // StockAsset 생성
           final newStockAsset = StockAsset(
             id: DateTime.now().millisecondsSinceEpoch.toString(),
-            symbol: _selectedStock!.symbol,
+            symbol: _selectedStock!.ticker,
             name: _selectedStock!.name,
             quantity: quantity,
             purchasePrice: purchasePrice,
             purchaseDate: DateTime.now(),
             currentPrice: currentPrice,
-            exchange: 'NASDAQ', // 기본값
+            exchange: _selectedStock!.primaryExchange.isNotEmpty
+                ? _selectedStock!.primaryExchange
+                : 'NASDAQ', // 기본값
           );
 
           // 중복 종목 체크
@@ -256,23 +260,22 @@ class _AddStockPageState extends State<AddStockPage> {
                           child: ListView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _searchResults.length > 5 ? 5 : _searchResults.length,
+                            itemCount: _searchResults.length > 10 ? 10 : _searchResults.length,
                             itemBuilder: (context, index) {
                               final stock = _searchResults[index];
                               return ListTile(
                                 dense: true,
                                 title: Text(
-                                  '${stock.symbol} - ${stock.name}',
+                                  '${stock.ticker} - ${stock.name}',
                                   style: const TextStyle(fontWeight: FontWeight.w500),
                                 ),
                                 subtitle: Text(
-                                  '${stock.type} | ${stock.region} | ${stock.currency}',
+                                  '${stock.type} | ${stock.primaryExchange} | ${stock.currencyName ?? 'USD'}',
                                   style: theme.textTheme.bodySmall,
                                 ),
-                                trailing: Text(
-                                  '${(double.tryParse(stock.matchScore) ?? 0 * 100).toStringAsFixed(0)}%',
-                                  style: theme.textTheme.bodySmall,
-                                ),
+                                trailing: stock.active
+                                    ? const Icon(Icons.check_circle, color: Colors.green, size: 16)
+                                    : const Icon(Icons.pause_circle, color: Colors.orange, size: 16),
                                 onTap: () => _selectStock(stock),
                               );
                             },
@@ -302,7 +305,7 @@ class _AddStockPageState extends State<AddStockPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '선택된 종목: ${_selectedStock!.symbol}',
+                                      '선택된 종목: ${_selectedStock!.ticker}',
                                       style: theme.textTheme.titleSmall?.copyWith(
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -310,6 +313,12 @@ class _AddStockPageState extends State<AddStockPage> {
                                     Text(
                                       _selectedStock!.name,
                                       style: theme.textTheme.bodySmall,
+                                    ),
+                                    Text(
+                                      '${_selectedStock!.primaryExchange} | ${_selectedStock!.type}',
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: Colors.grey[600],
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -466,14 +475,6 @@ class _AddStockPageState extends State<AddStockPage> {
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '• 종목명이나 심볼로 검색할 수 있습니다\n• 미국 주식만 지원됩니다\n• 추가한 주식은 홈과 나의 자산에서 확인 가능합니다',
-                      style: TextStyle(
-                        color: Colors.blue.shade700,
-                        fontSize: 12,
-                      ),
                     ),
                   ],
                 ),

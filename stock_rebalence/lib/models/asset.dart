@@ -30,19 +30,17 @@ abstract class Asset {
     this.currentPrice = 0.0,
   });
 
-  // 평가금액 계산
+  // 평가금액
   double get evaluationAmount => quantity * currentPrice;
 
-  // 평가손익 계산
+  // 평가손익
   double get profitLoss => (currentPrice - purchasePrice) * quantity;
 
-  // 수익률 계산
+  // 수익률
   double get profitLossRate => purchasePrice > 0 ? (currentPrice / purchasePrice - 1) * 100 : 0.0;
 
-  // JSON 직렬화를 위한 공통 메서드
   Map<String, dynamic> toJson();
 
-  // 팩토리 생성자
   static Asset fromJson(Map<String, dynamic> json) {
     final type = AssetType.values.firstWhere(
           (e) => e.name == json['type'],
@@ -108,7 +106,7 @@ class StockAsset extends Asset {
 // 현금 자산
 class CashAsset extends Asset {
   final String currency;
-  final String accountType; // 예금, 적금, 단기자금 등
+  final String accountType;
 
   CashAsset({
     required super.id,
@@ -119,7 +117,7 @@ class CashAsset extends Asset {
     this.accountType = '예금',
   }) : super(
     type: AssetType.cash,
-    purchasePrice: 1.0, // 현금은 항상 1
+    purchasePrice: 1.0,
     currentPrice: 1.0,
   );
 
@@ -150,9 +148,9 @@ class CashAsset extends Asset {
 
 // 채권 자산
 class BondAsset extends Asset {
-  final String issuer; // 발행기관
-  final double interestRate; // 금리
-  final DateTime maturityDate; // 만기일
+  final String issuer;
+  final double interestRate;
+  final DateTime maturityDate;
 
   BondAsset({
     required super.id,
@@ -197,8 +195,8 @@ class BondAsset extends Asset {
 
 // 금 자산
 class GoldAsset extends Asset {
-  final String unit; // 온스, 그램 등
-  final String storageLocation; // 보관 장소
+  final String unit;
+  final String storageLocation;
 
   GoldAsset({
     required super.id,

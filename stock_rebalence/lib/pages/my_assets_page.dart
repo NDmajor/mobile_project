@@ -2,8 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:stock_rebalence/models/asset.dart';
 import 'package:stock_rebalence/service/asset_repository.dart';
-import 'package:stock_rebalence/service/alpha_vantage_service.dart';
+import 'package:stock_rebalence/service/polygon_service.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
+//호에엥
 
 class MyAssetsPage extends StatefulWidget {
   const MyAssetsPage({super.key});
@@ -15,7 +16,7 @@ class MyAssetsPage extends StatefulWidget {
 class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMixin {
   late TabController _tabController;
   final AssetRepository _assetRepository = AssetRepository();
-  final AlphaVantageService _alphaVantageService = AlphaVantageService();
+  final PolygonService _polygonService = PolygonService();
 
   List<Asset> _allAssets = [];
   Map<String, dynamic> _statistics = {};
@@ -43,7 +44,6 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
       _allAssets = await _assetRepository.getAssets();
       _statistics = await _assetRepository.getAssetStatistics();
 
-      // 주식 자산의 현재가 업데이트
       await _updateStockPrices();
     } catch (e) {
       print('자산 로딩 오류: $e');
@@ -61,26 +61,24 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
       if (asset.type == AssetType.stock) {
         try {
           final stockAsset = asset as StockAsset;
-          final quote = await _alphaVantageService.getStockQuote(stockAsset.symbol);
+          final quote = await _polygonService.getStockQuote(stockAsset.symbol);
           if (quote != null) {
             asset.currentPrice = quote.price;
           }
-          // API 제한을 피하기 위해 잠시 대기
-          await Future.delayed(const Duration(milliseconds: 300));
+          await Future.delayed(const Duration(milliseconds: 500));
         } catch (e) {
           print('${asset.name} 가격 업데이트 실패: $e');
         }
       }
     }
 
-    // 업데이트된 자산 저장
     await _assetRepository.saveAssets(_allAssets);
     _statistics = await _assetRepository.getAssetStatistics();
   }
 
   List<Asset> _getFilteredAssets(int tabIndex) {
     switch (tabIndex) {
-      case 0: return _allAssets; // 전체
+      case 0: return _allAssets;
       case 1: return _allAssets.where((a) => a.type == AssetType.stock).toList();
       case 2: return _allAssets.where((a) => a.type == AssetType.cash).toList();
       case 3: return _allAssets.where((a) => a.type == AssetType.bond).toList();
@@ -93,14 +91,18 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
+    final cardBackgroundColor = isDarkMode ? Colors.grey[850] : Colors.white;
+    final textColor = isDarkMode ? Colors.white70 : Colors.black87;
+    final titleColor = isDarkMode ? Colors.white : Colors.black;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('나의 자산'),
+        title: Text('나의 자산', style: TextStyle(color: titleColor)),
+        backgroundColor: cardBackgroundColor,
         elevation: 1,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: Icon(Icons.refresh, color: titleColor),
             onPressed: _loadAssets,
             tooltip: '새로고침',
           ),
@@ -126,170 +128,129 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
         onRefresh: _loadAssets,
-        child: Column(
+        child: ListView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16.0),
           children: [
-            _buildSummaryCard(theme),
-            _buildAssetDistributionChart(theme),
-            _buildTabBar(theme),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildAssetList(0), // 전체
-                  _buildAssetList(1), // 주식
-                  _buildAssetList(2), // 현금
-                  _buildAssetList(3), // 채권
-                  _buildAssetList(4), // 금
-                ],
-              ),
-            ),
+            _buildSummaryCard(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 24),
+            _buildAssetDistributionChart(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 24),
+            _buildTabBar(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 16),
+            _buildAssetList(),
+            const SizedBox(height: 100),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton(
         heroTag: 'my_assets_fab_tag',
         onPressed: _showAddAssetBottomSheet,
-        icon: const Icon(Icons.add),
-        label: const Text('자산 추가'),
+        tooltip: '자산 추가',
+        child: const Icon(Icons.add),
       ),
     );
   }
 
-  Widget _buildSummaryCard(ThemeData theme) {
+  Widget _buildSummaryCard(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
     final totalAmount = _statistics['totalCurrentAmount'] ?? 0.0;
     final totalProfitLoss = _statistics['totalProfitLoss'] ?? 0.0;
     final profitLossRate = _statistics['totalProfitLossRate'] ?? 0.0;
 
-    return Container(
-      margin: const EdgeInsets.all(16.0),
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          padding: const EdgeInsets.all(20.0),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              colors: [
-                theme.colorScheme.primary,
-                theme.colorScheme.primary.withOpacity(0.8),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '총 자산 가치',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.white.withOpacity(0.9),
-                    ),
-                  ),
-                  Icon(
-                    Icons.account_balance_wallet,
-                    color: Colors.white.withOpacity(0.9),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '\$${totalAmount.toStringAsFixed(2)}',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
+    return Card(
+      color: cardColor,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '총 자산',
+                  style: theme.textTheme.titleMedium?.copyWith(color: textColor),
                 ),
+                Icon(
+                  Icons.account_balance_wallet,
+                  color: textColor,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '\$${totalAmount.toStringAsFixed(2)}',
+              style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: titleColor
               ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '총 평가손익',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withOpacity(0.8),
-                        ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('총 평가손익', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                    Text(
+                      '${totalProfitLoss >= 0 ? '+' : ''}\$${totalProfitLoss.toStringAsFixed(2)}',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: totalProfitLoss >= 0 ? Colors.green : Colors.red,
                       ),
-                      Text(
-                        '${totalProfitLoss >= 0 ? '+' : ''}\$${totalProfitLoss.toStringAsFixed(2)}',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('수익률', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                    Text(
+                      '${profitLossRate >= 0 ? '+' : ''}${profitLossRate.toStringAsFixed(2)}%',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: profitLossRate >= 0 ? Colors.green : Colors.red,
                       ),
-                    ],
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '수익률',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withOpacity(0.8),
-                        ),
-                      ),
-                      Text(
-                        '${profitLossRate >= 0 ? '+' : ''}${profitLossRate.toStringAsFixed(2)}%',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildStatItem('보유 종목', '${_allAssets.length}개', theme),
-                  const SizedBox(width: 16),
-                  _buildStatItem('자산 유형', '${(_statistics['assetTypeCount'] as Map? ?? {}).length}개', theme),
-                ],
-              ),
-            ],
-          ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildStatItem('보유 종목', '${_allAssets.length}개', theme, textColor, titleColor),
+                _buildStatItem('자산 유형', '${(_statistics['assetTypeCount'] as Map? ?? {}).length}개', theme, textColor, titleColor),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildStatItem(String label, String value, ThemeData theme) {
-    return Expanded( // 추가
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.white.withOpacity(0.8),
-            ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
+  Widget _buildStatItem(String label, String value, ThemeData theme, Color? textColor, Color? titleColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(color: textColor),
+        ),
+        Text(
+          value,
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: titleColor,
+            fontWeight: FontWeight.bold,
           ),
-          Text(
-            value,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildAssetDistributionChart(ThemeData theme) {
+  Widget _buildAssetDistributionChart(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
     final distribution = _statistics['assetTypeDistribution'] as Map<AssetType, double>? ?? {};
 
     if (distribution.isEmpty) {
@@ -303,49 +264,50 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
         _getAssetTypeColor(entry.key)))
         .toList();
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16.0),
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '자산 배분 현황',
-                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+    return Card(
+      color: cardColor,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '포트폴리오 현황',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: titleColor,
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 200,
-                child: SfCircularChart(
-                  legend: Legend(
-                    isVisible: true,
-                    position: LegendPosition.right,
-                    overflowMode: LegendItemOverflowMode.wrap,
-                  ),
-                  series: <CircularSeries>[
-                    DoughnutSeries<_ChartData, String>(
-                      dataSource: chartData,
-                      xValueMapper: (_ChartData data, _) => data.category,
-                      yValueMapper: (_ChartData data, _) => data.value,
-                      pointColorMapper: (_ChartData data, _) => data.color,
-                      dataLabelMapper: (_ChartData data, _) =>
-                      '${(data.value / (_statistics['totalCurrentAmount'] ?? 1) * 100).toStringAsFixed(1)}%',
-                      dataLabelSettings: const DataLabelSettings(
-                        isVisible: true,
-                        textStyle: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-                      ),
-                      enableTooltip: true,
-                      innerRadius: '60%',
-                    )
-                  ],
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 200,
+              child: SfCircularChart(
+                legend: Legend(
+                  isVisible: true,
+                  position: LegendPosition.right,
+                  overflowMode: LegendItemOverflowMode.wrap,
+                  textStyle: TextStyle(color: textColor),
                 ),
+                series: <CircularSeries>[
+                  PieSeries<_ChartData, String>(
+                    dataSource: chartData,
+                    xValueMapper: (_ChartData data, _) => data.category,
+                    yValueMapper: (_ChartData data, _) => data.value,
+                    pointColorMapper: (_ChartData data, _) => data.color,
+                    dataLabelMapper: (_ChartData data, _) =>
+                    '${(data.value / (_statistics['totalCurrentAmount'] ?? 1) * 100).toStringAsFixed(1)}%',
+                    dataLabelSettings: const DataLabelSettings(
+                      isVisible: true,
+                      textStyle: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                    enableTooltip: true,
+                  )
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -364,92 +326,101 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
     }
   }
 
-  Widget _buildTabBar(ThemeData theme) {
-    return Container(
-      margin: const EdgeInsets.all(16.0),
-      child: TabBar(
-        controller: _tabController,
-        isScrollable: true,
-        tabs: const [
-          Tab(child: FittedBox(child: Text('전체'))),
-          Tab(child: FittedBox(child: Text('주식'))),
-          Tab(child: FittedBox(child: Text('현금'))),
-          Tab(child: FittedBox(child: Text('채권'))),
-          Tab(child: FittedBox(child: Text('금'))),
-        ],
-        labelColor: theme.colorScheme.primary,
-        unselectedLabelColor: Colors.grey,
-        indicatorColor: theme.colorScheme.primary,
+  Widget _buildTabBar(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
+    return Card(
+      color: cardColor,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabs: const [
+            Tab(child: Text('전체')),
+            Tab(child: Text('주식')),
+            Tab(child: Text('현금')),
+            Tab(child: Text('채권')),
+            Tab(child: Text('금')),
+          ],
+          labelColor: theme.colorScheme.primary,
+          unselectedLabelColor: textColor,
+          indicatorColor: theme.colorScheme.primary,
+          dividerColor: Colors.transparent,
+        ),
       ),
     );
   }
 
-  Widget _buildAssetList(int tabIndex) {
+  Widget _buildAssetList() {
+    return SizedBox(
+      height: 400,
+      child: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildAssetListView(0), // 전체
+          _buildAssetListView(1), // 주식
+          _buildAssetListView(2), // 현금
+          _buildAssetListView(3), // 채권
+          _buildAssetListView(4), // 금
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssetListView(int tabIndex) {
     final assets = _getFilteredAssets(tabIndex);
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
+    final cardBackgroundColor = isDarkMode ? Colors.grey[850] : Colors.white;
+    final textColor = isDarkMode ? Colors.white70 : Colors.black87;
+    final titleColor = isDarkMode ? Colors.white : Colors.black;
 
     if (assets.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              _getTabIcon(tabIndex),
-              size: 64,
-              color: Colors.grey,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '${_getTabName(tabIndex)} 자산이 없습니다.',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '+ 버튼을 눌러 자산을 추가해보세요.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                _getTabIcon(tabIndex),
+                size: 64,
+                color: Colors.grey,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '${_getTabName(tabIndex)} 자산이 없습니다.',
+                style: theme.textTheme.titleMedium?.copyWith(color: textColor),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '+ 버튼을 눌러 자산을 추가해보세요.',
+                style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
+              ),
+            ],
+          ),
         ),
       );
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(16.0),
+      physics: const BouncingScrollPhysics(),
       itemCount: assets.length,
       itemBuilder: (context, index) {
-        return _buildAssetCard(assets[index]);
+        return _buildAssetCard(assets[index], cardBackgroundColor, textColor, titleColor);
       },
     );
   }
 
-  IconData _getTabIcon(int tabIndex) {
-    switch (tabIndex) {
-      case 0: return Icons.account_balance_wallet;
-      case 1: return Icons.trending_up;
-      case 2: return Icons.attach_money;
-      case 3: return Icons.receipt_long;
-      case 4: return Icons.stars;
-      default: return Icons.account_balance_wallet;
-    }
-  }
-
-  String _getTabName(int tabIndex) {
-    switch (tabIndex) {
-      case 0: return '전체';
-      case 1: return '주식';
-      case 2: return '현금';
-      case 3: return '채권';
-      case 4: return '금';
-      default: return '전체';
-    }
-  }
-
-  Widget _buildAssetCard(Asset asset) {
+  Widget _buildAssetCard(Asset asset, Color? cardColor, Color? textColor, Color? titleColor) {
     final theme = Theme.of(context);
     final profitLoss = asset.profitLoss;
     final profitLossRate = asset.profitLossRate;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12.0),
+      color: cardColor,
+      margin: const EdgeInsets.symmetric(vertical: 4.0),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
@@ -461,16 +432,10 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 457번째 줄 주변의 첫 번째 Row 수정
               Row(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: _getAssetTypeColor(asset.type).withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                  CircleAvatar(
+                    backgroundColor: _getAssetTypeColor(asset.type).withOpacity(0.2),
                     child: Icon(
                       _getAssetIcon(asset.type),
                       color: _getAssetTypeColor(asset.type),
@@ -478,7 +443,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Expanded( // 자산 이름 및 서브타이틀
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -486,102 +451,75 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
                           asset.name,
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
+                            color: titleColor,
                           ),
-                          overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                          maxLines: 1, // 한 줄로 제한
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                         Text(
                           _getAssetSubtitle(asset),
-                          style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
-                          overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                          maxLines: 1, // 한 줄로 제한
+                          style: theme.textTheme.bodySmall?.copyWith(color: textColor),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ],
                     ),
                   ),
-                  // 가격 및 손익 정보 (Flexible 또는 Expanded를 사용하여 공간 확보)
-                  // Flexible을 사용하면 내용이 길어져도 옆의 공간을 침범하지 않고 적절히 줄어듭니다.
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '\$${asset.currentPrice.toStringAsFixed(2)}',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.end, // 오른쪽 정렬
-                          overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                          maxLines: 1, // 한 줄로 제한
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '\$${asset.currentPrice.toStringAsFixed(2)}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: titleColor,
                         ),
-                        if (asset.type != AssetType.cash)
-                          Text(
-                            '${profitLoss >= 0 ? '+' : ''}\$${profitLoss.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: profitLoss >= 0 ? Colors.green : Colors.red,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            textAlign: TextAlign.end, // 오른쪽 정렬
-                            overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                            maxLines: 1, // 한 줄로 제한
+                      ),
+                      if (asset.type != AssetType.cash)
+                        Text(
+                          '${profitLoss >= 0 ? '+' : ''}\$${profitLoss.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: profitLoss >= 0 ? Colors.green : Colors.red,
+                            fontWeight: FontWeight.w500,
                           ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              // 513번째 줄 주변의 두 번째 Row 수정
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded( // '보유' 텍스트를 Expanded로 감싸 공간 유연하게 사용
-                    child: Text(
-                      '보유: ${asset.quantity.toStringAsFixed(asset.type == AssetType.cash ? 2 : 0)}${_getQuantityUnit(asset.type)}',
-                      style: theme.textTheme.bodySmall,
-                      overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                      maxLines: 1, // 한 줄로 제한
-                    ),
+                  Text(
+                    '보유: ${asset.quantity.toStringAsFixed(asset.type == AssetType.cash ? 2 : 0)}${_getQuantityUnit(asset.type)}',
+                    style: theme.textTheme.bodySmall?.copyWith(color: textColor),
                   ),
-                  const SizedBox(width: 8), // 필요에 따라 간격 조절
-                  Expanded( // '평가금액' 텍스트를 Expanded로 감싸 공간 유연하게 사용
-                    child: Text(
-                      '평가금액: \$${asset.evaluationAmount.toStringAsFixed(2)}',
-                      style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
-                      textAlign: TextAlign.end, // 오른쪽 정렬
-                      overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                      maxLines: 1, // 한 줄로 제한
+                  Text(
+                    '평가금액: \$${asset.evaluationAmount.toStringAsFixed(2)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: titleColor,
                     ),
                   ),
                 ],
               ),
               if (asset.type != AssetType.cash) ...[
                 const SizedBox(height: 8),
-                // 조건부로 렌더링되는 세 번째 Row 수정
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded( // '매수가' 텍스트를 Expanded로 감싸 공간 유연하게 사용
-                      child: Text(
-                        '매수가: \$${asset.purchasePrice.toStringAsFixed(2)}',
-                        style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
-                        overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                        maxLines: 1, // 한 줄로 제한
-                      ),
+                    Text(
+                      '매수가: \$${asset.purchasePrice.toStringAsFixed(2)}',
+                      style: theme.textTheme.bodySmall?.copyWith(color: textColor),
                     ),
-                    const SizedBox(width: 8), // 필요에 따라 간격 조절
-                    Expanded( // '수익률' 텍스트를 Expanded로 감싸 공간 유연하게 사용
-                      child: Text(
-                        '수익률: ${profitLossRate >= 0 ? '+' : ''}${profitLossRate.toStringAsFixed(2)}%',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: profitLossRate >= 0 ? Colors.green : Colors.red,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.end, // 오른쪽 정렬
-                        overflow: TextOverflow.ellipsis, // 텍스트 오버플로우 처리
-                        maxLines: 1, // 한 줄로 제한
+                    Text(
+                      '수익률: ${profitLossRate >= 0 ? '+' : ''}${profitLossRate.toStringAsFixed(2)}%',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: profitLossRate >= 0 ? Colors.green : Colors.red,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -637,6 +575,28 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
     }
   }
 
+  IconData _getTabIcon(int tabIndex) {
+    switch (tabIndex) {
+      case 0: return Icons.account_balance_wallet;
+      case 1: return Icons.trending_up;
+      case 2: return Icons.attach_money;
+      case 3: return Icons.receipt_long;
+      case 4: return Icons.stars;
+      default: return Icons.account_balance_wallet;
+    }
+  }
+
+  String _getTabName(int tabIndex) {
+    switch (tabIndex) {
+      case 0: return '전체';
+      case 1: return '주식';
+      case 2: return '현금';
+      case 3: return '채권';
+      case 4: return '금';
+      default: return '전체';
+    }
+  }
+
   void _showAssetDetail(Asset asset) {
     showDialog(
       context: context,
@@ -650,13 +610,12 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
               _buildDetailRow('자산 유형', asset.type.displayName),
               _buildDetailRow('보유 수량', '${asset.quantity.toStringAsFixed(2)}${_getQuantityUnit(asset.type)}'),
               if (asset.type != AssetType.cash) ...[
-                // 수정된 부분: '\$' 뒤에 asset 변수들이 중괄호로 올바르게 감싸져야 합니다.
-                _buildDetailRow('매수가', '\$${asset.purchasePrice.toStringAsFixed(2)}'), // 여기를 수정
-                _buildDetailRow('현재가', '\$${asset.currentPrice.toStringAsFixed(2)}'), // 여기를 수정
-                _buildDetailRow('평가손익', '${asset.profitLoss >= 0 ? '+' : ''}\$${asset.profitLoss.toStringAsFixed(2)}'), // 여기를 수정
+                _buildDetailRow('매수가', '\$${asset.purchasePrice.toStringAsFixed(2)}'),
+                _buildDetailRow('현재가', '\$${asset.currentPrice.toStringAsFixed(2)}'),
+                _buildDetailRow('평가손익', '${asset.profitLoss >= 0 ? '+' : ''}\$${asset.profitLoss.toStringAsFixed(2)}'),
                 _buildDetailRow('수익률', '${asset.profitLossRate >= 0 ? '+' : ''}${asset.profitLossRate.toStringAsFixed(2)}%'),
               ],
-              _buildDetailRow('평가금액', '\$${asset.evaluationAmount.toStringAsFixed(2)}'), // 여기를 수정
+              _buildDetailRow('평가금액', '\$${asset.evaluationAmount.toStringAsFixed(2)}'),
               _buildDetailRow('매수일', '${asset.purchaseDate.year}-${asset.purchaseDate.month.toString().padLeft(2, '0')}-${asset.purchaseDate.day.toString().padLeft(2, '0')}'),
               ..._buildAssetSpecificDetails(asset),
             ],
@@ -747,7 +706,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
             ListTile(
               leading: const Icon(Icons.sell, color: Colors.orange),
               title: const Text('일부 판매'),
-              subtitle: const Text('보유 수량의 일부를 판매합니다'),
+              subtitle: const Text('보유 수량의 일부를 판매'),
               onTap: () {
                 Navigator.pop(context);
                 _showSellAssetDialog(asset);
@@ -756,7 +715,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
             ListTile(
               leading: const Icon(Icons.edit, color: Colors.blue),
               title: const Text('정보 수정'),
-              subtitle: const Text('자산 정보를 수정합니다'),
+              subtitle: const Text('자산 정보를 수정'),
               onTap: () {
                 Navigator.pop(context);
                 _showEditAssetDialog(asset);
@@ -765,7 +724,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
             ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
               title: const Text('완전 삭제'),
-              subtitle: const Text('이 자산을 완전히 삭제합니다'),
+              subtitle: const Text('이 자산을 완전히 삭제'),
               onTap: () {
                 Navigator.pop(context);
                 _showDeleteAssetDialog(asset);
@@ -833,7 +792,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
                 );
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('올바른 수량을 입력해주세요')),
+                  const SnackBar(content: Text('올바른 수량을 입력')),
                 );
               }
             },
@@ -845,9 +804,8 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
   }
 
   void _showEditAssetDialog(Asset asset) {
-    // 자산 정보 수정 다이얼로그 (간단한 버전)
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('자산 정보 수정 기능은 개발 중입니다')),
+      const SnackBar(content: Text('자산 정보 수정 기능은 개발 중')),
     );
   }
 
@@ -870,7 +828,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
               _loadAssets();
 
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('${asset.name}이(가) 삭제되었습니다')),
+                SnackBar(content: Text('${asset.name}이(가) 삭제')),
               );
             },
             child: const Text('삭제', style: TextStyle(color: Colors.white)),
@@ -1055,7 +1013,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
                 );
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('모든 필드를 올바르게 입력해주세요')),
+                  const SnackBar(content: Text('모든 칸 올바르게 입력')),
                 );
               }
             },
@@ -1118,7 +1076,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
           TextField(
             controller: controller1,
             decoration: const InputDecoration(
-              labelText: '단위 (예: 온스, 그램)',
+              labelText: '단위 (예: 그램)',
               border: OutlineInputBorder(),
             ),
           ),
@@ -1174,19 +1132,19 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
           storageLocation: controller2.text.isEmpty ? '은행 금고' : controller2.text,
         );
       default:
-        throw UnsupportedError('지원하지 않는 자산 유형입니다');
+        throw UnsupportedError('지원하지 않는 자산 유형');
     }
   }
 
   void _exportAssets() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('자산 내보내기 기능은 개발 중입니다')),
+      const SnackBar(content: Text('자산 내보내기 기능은 개발 중')),
     );
   }
 
   void _showSettings() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('설정 기능은 개발 중입니다')),
+      const SnackBar(content: Text('설정 기능은 개발 중')),
     );
   }
 }

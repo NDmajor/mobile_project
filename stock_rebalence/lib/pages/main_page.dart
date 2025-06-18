@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:stock_rebalence/pages/stock_status_page.dart';
 import 'package:stock_rebalence/pages/my_assets_page.dart';
 import 'package:stock_rebalence/pages/rebalence_page.dart';
-
+//호에엥
+//2020010844 신영성 스톡 리밸런싱 앱
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -15,9 +16,9 @@ class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
 
   final List<Widget> _pages = [
-    const AccountStatusPage(), // 홈
-    const MyAssetsPage(),      // 나의 자산
-    const RebalancePage(),     // 리밸런싱
+    const AccountStatusPage(),
+    const MyAssetsPage(),
+    const RebalancePage(),
   ];
 
   void _onItemTapped(int index) {

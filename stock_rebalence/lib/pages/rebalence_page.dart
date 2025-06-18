@@ -2,9 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:stock_rebalence/models/asset.dart';
 import 'package:stock_rebalence/service/asset_repository.dart';
-import 'package:syncfusion_flutter_charts/charts.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // shared_preferences 임포트 추가
-
+import 'package:shared_preferences/shared_preferences.dart';
+//호에엥
 class RebalancePage extends StatefulWidget {
   const RebalancePage({super.key});
 
@@ -19,7 +18,7 @@ class _RebalancePageState extends State<RebalancePage> {
   Map<String, dynamic> _statistics = {};
   bool _isLoading = true;
 
-  // 목표 배분 비율 (사용자가 설정 가능)
+  // 목표 배분 비율 기본값
   Map<AssetType, double> _targetAllocation = {
     AssetType.stock: 60.0,
     AssetType.bond: 30.0,
@@ -104,19 +103,24 @@ class _RebalancePageState extends State<RebalancePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
+    final cardBackgroundColor = isDarkMode ? Colors.grey[850] : Colors.white;
+    final textColor = isDarkMode ? Colors.white70 : Colors.black87;
+    final titleColor = isDarkMode ? Colors.white : Colors.black;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('포트폴리오 리밸런싱'),
+        title: Text('포트폴리오 리밸런싱', style: TextStyle(color: titleColor)),
+        backgroundColor: cardBackgroundColor,
         elevation: 1,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: Icon(Icons.refresh, color: titleColor),
             onPressed: _loadData,
             tooltip: '새로고침',
           ),
           IconButton(
-            icon: const Icon(Icons.tune), // 아이콘을 settings에서 tune으로 변경했습니다.
+            icon: Icon(Icons.tune, color: titleColor),
             onPressed: _showTargetAllocationSettings,
             tooltip: '목표 비율 설정',
           ),
@@ -126,86 +130,84 @@ class _RebalancePageState extends State<RebalancePage> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
         onRefresh: _loadData,
-        child: SingleChildScrollView(
+        child: ListView(
+          physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildPortfolioOverview(theme),
-              const SizedBox(height: 24),
-              _buildTargetAllocationCard(theme), // 새로 추가된 부분
-              const SizedBox(height: 24),
-              _buildAllocationComparison(theme),
-              const SizedBox(height: 24),
-              _buildRebalanceRecommendations(theme),
-              const SizedBox(height: 24),
-              _buildActionButtons(theme),
-            ],
-          ),
+          children: [
+            _buildPortfolioOverview(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 24),
+            _buildTargetAllocationCard(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 24),
+            _buildAllocationComparison(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 24),
+            _buildRebalanceRecommendations(theme, cardBackgroundColor, textColor, titleColor),
+            const SizedBox(height: 24),
+            const SizedBox(height: 100), // 추가 여백 오류방지용
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildPortfolioOverview(ThemeData theme) {
+  Widget _buildPortfolioOverview(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
     final totalAmount = _statistics['totalCurrentAmount'] as double? ?? 0.0;
     final totalProfitLoss = _statistics['totalProfitLoss'] as double? ?? 0.0;
     final profitLossRate = _statistics['totalProfitLossRate'] as double? ?? 0.0;
 
     return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        padding: const EdgeInsets.all(20.0),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: [
-              theme.colorScheme.primary.withOpacity(0.1),
-              theme.colorScheme.primary.withOpacity(0.05),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
+      color: cardColor,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(Icons.pie_chart, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
                 Text(
                   '포트폴리오 현황',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary,
-                  ),
+                  style: theme.textTheme.titleMedium?.copyWith(color: textColor),
                 ),
+                Icon(Icons.pie_chart, color: textColor),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             Text(
               '총 자산: \$${totalAmount.toStringAsFixed(2)}',
-              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: titleColor,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '평가손익: ${totalProfitLoss >= 0 ? '+' : ''}\$${totalProfitLoss.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: totalProfitLoss >= 0 ? Colors.green : Colors.red,
-                    fontWeight: FontWeight.w500,
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('평가손익', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                    Text(
+                      '${totalProfitLoss >= 0 ? '+' : ''}\$${totalProfitLoss.toStringAsFixed(2)}',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: totalProfitLoss >= 0 ? Colors.green : Colors.red,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 16),
-                Text(
-                  '수익률: ${profitLossRate >= 0 ? '+' : ''}${profitLossRate.toStringAsFixed(2)}%',
-                  style: TextStyle(
-                    color: profitLossRate >= 0 ? Colors.green : Colors.red,
-                    fontWeight: FontWeight.w500,
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('수익률', style: theme.textTheme.bodySmall?.copyWith(color: textColor)),
+                    Text(
+                      '${profitLossRate >= 0 ? '+' : ''}${profitLossRate.toStringAsFixed(2)}%',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: profitLossRate >= 0 ? Colors.green : Colors.red,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -215,8 +217,9 @@ class _RebalancePageState extends State<RebalancePage> {
     );
   }
 
-  Widget _buildTargetAllocationCard(ThemeData theme) {
+  Widget _buildTargetAllocationCard(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
     return Card(
+      color: cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -229,7 +232,10 @@ class _RebalancePageState extends State<RebalancePage> {
               children: [
                 Text(
                   '목표 자산 배분',
-                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: titleColor,
+                  ),
                 ),
                 TextButton.icon(
                   onPressed: _showTargetAllocationSettings,
@@ -257,12 +263,18 @@ class _RebalancePageState extends State<RebalancePage> {
                     Expanded(
                       child: Text(
                         type.displayName,
-                        style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: titleColor,
+                        ),
                       ),
                     ),
                     Text(
                       '${target.toStringAsFixed(1)}%',
-                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: titleColor,
+                      ),
                     ),
                   ],
                 ),
@@ -282,7 +294,7 @@ class _RebalancePageState extends State<RebalancePage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '목표 배분은 개인의 투자 성향과 목표에 따라 설정하세요.',
+                      '목표 배분은 개인의 투자 성향과 목표에 따라 설정할 것',
                       style: TextStyle(
                         color: Colors.blue.shade700,
                         fontSize: 12,
@@ -298,10 +310,11 @@ class _RebalancePageState extends State<RebalancePage> {
     );
   }
 
-  Widget _buildAllocationComparison(ThemeData theme) {
+  Widget _buildAllocationComparison(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
     final currentAllocation = _getCurrentAllocation();
 
     return Card(
+      color: cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -311,13 +324,16 @@ class _RebalancePageState extends State<RebalancePage> {
           children: [
             Text(
               '자산 배분 비교',
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: titleColor,
+              ),
             ),
             const SizedBox(height: 16),
             ...AssetType.values.map((type) {
               final current = currentAllocation[type] ?? 0.0;
               final target = _targetAllocation[type] ?? 0.0;
-              return _buildAllocationBar(type, current, target, theme);
+              return _buildAllocationBar(type, current, target, theme, textColor, titleColor);
             }).toList(),
           ],
         ),
@@ -325,7 +341,7 @@ class _RebalancePageState extends State<RebalancePage> {
     );
   }
 
-  Widget _buildAllocationBar(AssetType type, double current, double target, ThemeData theme) {
+  Widget _buildAllocationBar(AssetType type, double current, double target, ThemeData theme, Color? textColor, Color? titleColor) {
     final difference = current - target;
     final isOverweight = difference > 0;
 
@@ -339,11 +355,14 @@ class _RebalancePageState extends State<RebalancePage> {
             children: [
               Text(
                 type.displayName,
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                  color: titleColor,
+                ),
               ),
               Text(
                 '현재 ${current.toStringAsFixed(1)}% / 목표 ${target.toStringAsFixed(1)}%',
-                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+                style: theme.textTheme.bodySmall?.copyWith(color: textColor),
               ),
             ],
           ),
@@ -402,10 +421,11 @@ class _RebalancePageState extends State<RebalancePage> {
     }
   }
 
-  Widget _buildRebalanceRecommendations(ThemeData theme) {
+  Widget _buildRebalanceRecommendations(ThemeData theme, Color? cardColor, Color? textColor, Color? titleColor) {
     final rebalanceAmounts = _getRebalanceAmounts();
 
     return Card(
+      color: cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -419,7 +439,10 @@ class _RebalancePageState extends State<RebalancePage> {
                 const SizedBox(width: 8),
                 Text(
                   '리밸런싱 권장사항',
-                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: titleColor,
+                  ),
                 ),
               ],
             ),
@@ -428,7 +451,7 @@ class _RebalancePageState extends State<RebalancePage> {
               final type = entry.key;
               final amount = entry.value;
 
-              if (amount.abs() < 10) return const SizedBox.shrink(); // 소액은 무시
+              if (amount.abs() < 10) return const SizedBox.shrink(); // 소액 무시
 
               final isIncrease = amount > 0;
 
@@ -452,8 +475,11 @@ class _RebalancePageState extends State<RebalancePage> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '${type.displayName}을(를) ${isIncrease ? '추가 매수' : '일부 판매'}: \$${amount.abs().toStringAsFixed(2)}',
-                        style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                        '${type.displayName}을(를) ${isIncrease ? '추가 매수' : '일부 판매'}: ${amount.abs().toStringAsFixed(2)}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: titleColor,
+                        ),
                       ),
                     ),
                   ],
@@ -472,8 +498,11 @@ class _RebalancePageState extends State<RebalancePage> {
                   children: [
                     Icon(Icons.check_circle, color: Colors.blue, size: 20),
                     const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text('포트폴리오가 목표 배분에 근접합니다. 리밸런싱이 필요하지 않습니다.'),
+                    Expanded(
+                      child: Text(
+                        '포트폴리오가 목표 배분에 근접합니다. 리밸런싱이 필요하지 않습니다.',
+                        style: theme.textTheme.bodyMedium?.copyWith(color: titleColor),
+                      ),
                     ),
                   ],
                 ),
@@ -482,38 +511,6 @@ class _RebalancePageState extends State<RebalancePage> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildActionButtons(ThemeData theme) {
-    return Column(
-      children: [
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: _executeRebalancing,
-            icon: const Icon(Icons.autorenew),
-            label: const Text('자동 리밸런싱 실행'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: theme.colorScheme.primary,
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _showManualRebalancing,
-            icon: const Icon(Icons.edit),
-            label: const Text('수동 리밸런싱'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -553,7 +550,7 @@ class _RebalancePageState extends State<RebalancePage> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              '슬라이더를 조정하여 각 자산 유형의 목표 비율을 설정하세요.',
+                              '슬라이더를 조정하여 각 자산 유형의 목표 비율을 설정',
                               style: TextStyle(
                                 color: Colors.blue.shade700,
                                 fontSize: 12,
@@ -655,7 +652,7 @@ class _RebalancePageState extends State<RebalancePage> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '총합이 100%가 되어야 합니다.',
+                                '총합이 100%가 되어야 함',
                                 style: TextStyle(
                                   color: Colors.red.shade700,
                                   fontSize: 12,
@@ -700,7 +697,7 @@ class _RebalancePageState extends State<RebalancePage> {
                         _saveTargetAllocation();
                         Navigator.of(context).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('목표 배분이 저장되었습니다.')),
+                          const SnackBar(content: Text('목표 배분 저장 완료')),
                         );
                       } : null,
                       child: const Text('저장'),
@@ -712,37 +709,6 @@ class _RebalancePageState extends State<RebalancePage> {
           },
         );
       },
-    );
-  }
-
-  void _executeRebalancing() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('자동 리밸런싱'),
-        content: const Text('자동 리밸런싱을 실행하시겠습니까?\n이 기능은 현재 시뮬레이션 모드입니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('취소'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('자동 리밸런싱 기능은 개발 중입니다')),
-              );
-            },
-            child: const Text('실행'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showManualRebalancing() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('수동 리밸런싱 기능은 개발 중입니다')),
     );
   }
 }
