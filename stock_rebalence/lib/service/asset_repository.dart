@@ -6,14 +6,12 @@ import 'package:stock_rebalence/models/asset.dart';
 class AssetRepository {
   static const String _assetsKey = 'user_assets';
 
-  // 모든 자산 저장
   Future<void> saveAssets(List<Asset> assets) async {
     final prefs = await SharedPreferences.getInstance();
     List<String> assetsJson = assets.map((asset) => jsonEncode(asset.toJson())).toList();
     await prefs.setStringList(_assetsKey, assetsJson);
   }
 
-  // 모든 자산 조회
   Future<List<Asset>> getAssets() async {
     final prefs = await SharedPreferences.getInstance();
     List<String>? assetsJson = prefs.getStringList(_assetsKey);
@@ -25,13 +23,11 @@ class AssetRepository {
         .toList();
   }
 
-  // 자산 유형별 조회
   Future<List<Asset>> getAssetsByType(AssetType type) async {
     final assets = await getAssets();
     return assets.where((asset) => asset.type == type).toList();
   }
 
-  // 특정 자산 조회
   Future<Asset?> getAssetById(String id) async {
     final assets = await getAssets();
     try {
@@ -41,14 +37,45 @@ class AssetRepository {
     }
   }
 
-  // 자산 추가
-  Future<void> addAsset(Asset asset) async {
+  Future<bool> addAsset(Asset asset) async {
     List<Asset> assets = await getAssets();
+
+    if (asset.type == AssetType.stock) {
+      final stockAsset = asset as StockAsset;
+      final existingIndex = assets.indexWhere((existingAsset) =>
+      existingAsset.type == AssetType.stock &&
+          (existingAsset as StockAsset).symbol.toLowerCase() == stockAsset.symbol.toLowerCase()
+      );
+
+      if (existingIndex != -1) {
+        final existingStock = assets[existingIndex] as StockAsset;
+        final totalQuantity = existingStock.quantity + stockAsset.quantity;
+        final totalValue = (existingStock.quantity * existingStock.purchasePrice) +
+            (stockAsset.quantity * stockAsset.purchasePrice);
+        final newAveragePrice = totalValue / totalQuantity;
+
+        final updatedStock = StockAsset(
+          id: existingStock.id,
+          symbol: existingStock.symbol,
+          name: existingStock.name.isNotEmpty ? existingStock.name : stockAsset.name,
+          quantity: totalQuantity,
+          purchasePrice: newAveragePrice,
+          purchaseDate: existingStock.purchaseDate,
+          currentPrice: stockAsset.currentPrice,
+          exchange: existingStock.exchange,
+        );
+
+        assets[existingIndex] = updatedStock;
+        await saveAssets(assets);
+        return false;
+      }
+    }
+
     assets.add(asset);
     await saveAssets(assets);
+    return true;
   }
 
-  // 자산 업데이트
   Future<void> updateAsset(Asset updatedAsset) async {
     List<Asset> assets = await getAssets();
     int index = assets.indexWhere((asset) => asset.id == updatedAsset.id);
@@ -58,14 +85,12 @@ class AssetRepository {
     }
   }
 
-  // 자산 삭제
   Future<void> deleteAsset(String id) async {
     List<Asset> assets = await getAssets();
     assets.removeWhere((asset) => asset.id == id);
     await saveAssets(assets);
   }
 
-  // 자산 일부 판매 (수량 감소)
   Future<void> sellAsset(String id, double quantityToSell, double sellPrice) async {
     List<Asset> assets = await getAssets();
     int index = assets.indexWhere((asset) => asset.id == id);
@@ -73,29 +98,22 @@ class AssetRepository {
     if (index != -1) {
       Asset asset = assets[index];
       if (asset.quantity >= quantityToSell) {
-        // 판매 기록을 위한 새로운 자산 생성 (판매 이력 관리용)
         Asset soldAsset = _createSoldAsset(asset, quantityToSell, sellPrice);
 
-        // 기존 자산의 수량 감소
         Asset updatedAsset = _updateAssetQuantity(asset, asset.quantity - quantityToSell);
 
         if (updatedAsset.quantity <= 0) {
-          // 수량이 0이 되면 자산 삭제
           assets.removeAt(index);
         } else {
-          // 수량이 남아있으면 업데이트
           assets[index] = updatedAsset;
         }
 
-        // 판매 이력 저장 (별도 구현 가능)
         await _saveSaleHistory(soldAsset, sellPrice);
-
         await saveAssets(assets);
       }
     }
   }
 
-  // 자산 수량 업데이트를 위한 헬퍼 메서드
   Asset _updateAssetQuantity(Asset asset, double newQuantity) {
     switch (asset.type) {
       case AssetType.stock:
@@ -148,7 +166,6 @@ class AssetRepository {
     }
   }
 
-  // 판매된 자산 생성 (판매 이력용)
   Asset _createSoldAsset(Asset asset, double soldQuantity, double sellPrice) {
     switch (asset.type) {
       case AssetType.stock:
@@ -201,20 +218,15 @@ class AssetRepository {
     }
   }
 
-  // 판매 이력 저장 (향후 확장 가능)
   Future<void> _saveSaleHistory(Asset soldAsset, double sellPrice) async {
-    // 판매 이력을 별도로 저장하는 로직
-    // 현재는 간단히 로그만 출력
     print('판매 완료: ${soldAsset.name}, 수량: ${soldAsset.quantity}, 판매가: $sellPrice');
   }
 
-  // 모든 자산 삭제
   Future<void> clearAllAssets() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_assetsKey);
   }
 
-  // 자산 통계 계산
   Future<Map<String, dynamic>> getAssetStatistics() async {
     final assets = await getAssets();
 

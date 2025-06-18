@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:stock_rebalence/models/asset.dart';
 import 'package:stock_rebalence/service/asset_repository.dart';
 import 'package:stock_rebalence/service/yahoo_finance_service.dart';
+import 'package:stock_rebalence/pages/edit_asset_page.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 
 class MyAssetsPage extends StatefulWidget {
@@ -24,7 +25,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this); // 전체, 주식, 현금, 채권, 금
+    _tabController = TabController(length: 5, vsync: this);
     _loadAssets();
   }
 
@@ -42,7 +43,6 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
     try {
       _allAssets = await _assetRepository.getAssets();
       _statistics = await _assetRepository.getAssetStatistics();
-
       await _updateStockPricesWithYahoo();
     } catch (e) {
       print('자산 로딩 오류: $e');
@@ -86,7 +86,7 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
           if (quote != null) {
             stockAsset.currentPrice = quote.price;
           }
-          await Future.delayed(const Duration(milliseconds: 200)); // 혹시몰라 딜딜딜딜레이
+          await Future.delayed(const Duration(milliseconds: 200));
         } catch (e) {
           print('${stockAsset.symbol} 개별 가격 업데이트 실패: $e');
         }
@@ -131,10 +131,8 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
             onSelected: (value) {
               switch (value) {
                 case 'export':
-
                   break;
                 case 'settings':
-
                   break;
               }
             },
@@ -380,11 +378,11 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
       child: TabBarView(
         controller: _tabController,
         children: [
-          _buildAssetListView(0), // 전체
-          _buildAssetListView(1), // 주식
-          _buildAssetListView(2), // 현금
-          _buildAssetListView(3), // 채권
-          _buildAssetListView(4), // 금
+          _buildAssetListView(0),
+          _buildAssetListView(1),
+          _buildAssetListView(2),
+          _buildAssetListView(3),
+          _buildAssetListView(4),
         ],
       ),
     );
@@ -743,27 +741,27 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
             ),
             const SizedBox(height: 20),
             ListTile(
-              leading: const Icon(Icons.sell, color: Colors.orange),
-              title: const Text('일부 판매'),
-              subtitle: const Text('보유 수량의 일부를 판매'),
-              onTap: () {
-                Navigator.pop(context);
-                _showSellAssetDialog(asset);
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.edit, color: Colors.blue),
               title: const Text('정보 수정'),
-              subtitle: const Text('자산 정보를 수정'),
+              subtitle: const Text('자산 정보를 수정합니다'),
               onTap: () {
                 Navigator.pop(context);
                 _showEditAssetDialog(asset);
               },
             ),
             ListTile(
+              leading: const Icon(Icons.sell, color: Colors.orange),
+              title: const Text('일부 판매'),
+              subtitle: const Text('보유 수량의 일부를 판매합니다'),
+              onTap: () {
+                Navigator.pop(context);
+                _showSellAssetDialog(asset);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
               title: const Text('완전 삭제'),
-              subtitle: const Text('이 자산을 완전히 삭제'),
+              subtitle: const Text('이 자산을 완전히 삭제합니다'),
               onTap: () {
                 Navigator.pop(context);
                 _showDeleteAssetDialog(asset);
@@ -774,6 +772,19 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
         ),
       ),
     );
+  }
+
+  void _showEditAssetDialog(Asset asset) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditAssetPage(asset: asset),
+      ),
+    );
+
+    if (result == true) {
+      _loadAssets();
+    }
   }
 
   void _showSellAssetDialog(Asset asset) {
@@ -840,12 +851,6 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
           ),
         ],
       ),
-    );
-  }
-
-  void _showEditAssetDialog(Asset asset) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('자산 정보 수정 기능은 개발 중입니다')),
     );
   }
 
@@ -1180,7 +1185,6 @@ class _MyAssetsPageState extends State<MyAssetsPage> with TickerProviderStateMix
   }
 }
 
-// 차트 데이터 클래스
 class _ChartData {
   _ChartData(this.category, this.value, this.color);
   final String category;

@@ -4,6 +4,7 @@ import 'package:stock_rebalence/pages/main_page.dart';
 import 'package:stock_rebalence/pages/add_stock_page.dart';
 import 'package:stock_rebalence/pages/my_assets_page.dart';
 import 'package:stock_rebalence/pages/rebalence_page.dart';
+import 'package:stock_rebalence/pages/edit_asset_page.dart';
 
 void main() async {
   runApp(const MyApp());
@@ -83,7 +84,7 @@ class MyApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.system,
-      home: const MainPage(), // MainPage를 다시 홈으로 설정
+      home: const MainPage(),
       debugShowCheckedModeBanner: false,
       routes: {
         '/add_stock': (context) => const AddStockPage(),
